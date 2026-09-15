@@ -31,7 +31,7 @@ ESTIMATION_EXAMPLES = [
                 "Dotación o Creación de infraestructura nueva.",
             ],
             "Desglose de Tareas": [
-                {"task": "Project Managment", "hours": 30},
+                {"task": "Project Managment", "hours": 39},
                 {"task": "Diseño UI/UIX", "hours": 25},
                 {"task": "Generación de Módulo Real", "hours": 25},
                 {"task": "Generación de Módulo Budget", "hours": 25},

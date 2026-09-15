@@ -1,20 +1,20 @@
 # Estimador CAG · de la reunión a una estimación
 
-Aplicación web para guardar ideas, incorporar una transcripción de reunión y
-generar una estimación de software con OpenAI. Cada idea conserva sus notas,
-su estado y el historial de estimaciones, para poder revisar cómo evoluciona.
+Aplicación web para generar propuestas a clientes para proyectos, incorporando requerimientos de reunión y
+generando una estimación de equipos y dedicaciones en horas y euros con OpenAI. 
+Cada idea conserva sus notas, su estado y el historial de estimaciones, para poder revisar cómo evoluciona.
 
-El objetivo del ejercicio es comprobar el flujo completo:
+El objetivo de esta primera Version 0.1.0 es comprobar el flujo completo:
 
 **Transcripción → validación → instrucciones y ejemplos CAG → OpenAI → estimación.**
 
-La calidad y precisión de las estimaciones se revisarán en las siguientes
-iteraciones. Una respuesta correcta de la API demuestra que funciona el circuito;
+No se busca exactitud. Se busca flujo OK. 
+Una respuesta correcta de la API demuestra que funciona el circuito;
 no demuestra que las horas propuestas sean adecuadas para un proyecto real.
 
 ## Arranque en tu equipo
 
-Necesitas Python 3.11 o posterior y [uv](https://docs.astral.sh/uv/getting-started/installation/).
+Python 3.11 o posterior y [uv](https://docs.astral.sh/uv/getting-started/installation/).
 Ejecuta los comandos desde la carpeta `estimador-cag`, donde está este README:
 
 ```powershell
@@ -32,7 +32,7 @@ Conserva tu archivo si ya contiene la clave y el modelo. Completa al menos:
 
 ```dotenv
 OPENAI_API_KEY=tu_clave_de_OpenAI
-LLM_MODEL=gpt-4o-mini
+LLM_MODEL=tu modelo OpenAI
 ```
 
 Inicia la aplicación:
@@ -47,29 +47,22 @@ La documentación técnica interactiva sigue disponible en
 
 ## Probar el ejercicio desde la web
 
-1. En **Preparar**, añade un nombre y una descripción del proyecto.
-2. Pega la transcripción o pulsa **Importar archivo** para cargar un `.txt`/`.md`.
-3. También puedes pulsar **Cargar reunión de ejemplo**, que usa
+1. Registra un proyecto / idea con un título y una descripción del proyecto.
+2. Pega la transcripción o carga un archivo de texto `.txt`/`.md`.
+3. También puedes cargar el ejemplo incluido en
    [docs/transcripcion_reunion.md](docs/transcripcion_reunion.md).
-4. Pulsa **Generar estimación**: guarda la idea y envía el texto al modelo
+4. Guarda la idea y genera su estimación. La aplicación envía el texto al modelo
    configurado; esta acción consume la API de OpenAI.
-5. En **Estimación**, revisa el resultado, los supuestos y las preguntas pendientes.
-   Puedes copiarlo o descargarlo como Markdown.
-6. En **Seguimiento**, añade notas y actualiza el estado: idea, en revisión,
-   planificada o completada. Pulsa **Guardar seguimiento** para conservarlos.
-   Puedes volver a generar una estimación y consultar
+5. Revisa el resultado, los supuestos, las exclusiones y las preguntas pendientes.
+6. Añade notas y actualiza el estado de seguimiento: borrador, en revisión,
+   planificada o completada. Puedes volver a generar una estimación y consultar
    las versiones anteriores con la transcripción que se utilizó en cada una.
-
-**Solo la transcripción se envía al modelo.** El nombre, la descripción, el estado
-y las notas organizan el seguimiento local. Si una decisión debe cambiar la
-próxima estimación, incorpórala a la transcripción antes de generar otra versión.
-**Guardar idea** permite conservar un borrador sin realizar una llamada al LLM.
 
 El ejemplo de reunión es ficticio y trata de un módulo de reservas de salas. Está
 versionado junto con este README para que todas las personas usen la misma entrada
 durante el ejercicio. La web y el pipeline leen ese mismo archivo.
 
-## Arquitectura y responsabilidades
+## Arquitectura y capa de responsabilidades
 
 ```text
 estimador-cag/
@@ -109,21 +102,11 @@ estimador-cag/
 ```
 
 El contenido de `ESTIMATION_EXAMPLES` se incorpora al mensaje `system`, junto
-con las instrucciones de estimación. La transcripción completa se envía como
-mensaje `user`. El mensaje `assistant` contiene la estimación devuelta por el
-modelo mediante [Chat Completions](https://developers.openai.com/api/reference/python/resources/chat/subresources/completions/methods/create).
+con las instrucciones de estimación. 
+La transcripción completa se envía como mensaje `user`. El mensaje `assistant` contiene la estimación devuelta por el modelo.
 
 En este ejercicio, **CAG es el contexto de referencia que aportamos al modelo**.
-Los ejemplos permanecen en el repositorio y se añaden a cada petición; no entrenamos
-un modelo ni utilizamos una base vectorial. Tampoco implementamos una caché propia
-de respuestas o del estado interno del modelo.
-
-### Referencias pendientes de revisar
-
-El ejemplo de Tesorería en `examples.py` tiene un desglose que suma **183 horas** y
-un total declarado de **320 horas**. Se conserva para la revisión del ejercicio.
-El prompt pide no copiar esa inconsistencia. La validación automatizada comprueba
-que se inyecten los ejemplos, no aprueba la exactitud de sus cifras.
+Los ejemplos permanecen en el repositorio y se añaden a cada petición.
 
 ## API
 
@@ -180,11 +163,6 @@ El pipeline realiza cuatro comprobaciones y termina con código `0` solo si pasa
    `TestClient`: verifica la web, sus recursos, `/health`, el rechazo de texto
    vacío y el recorrido completo de una petición válida por el servicio y el SDK.
 
-Para la última comprobación se usa el SDK real de OpenAI con
-`httpx.MockTransport`: la respuesta HTTP del proveedor se simula. Se inspecciona
-que el mensaje `system` contenga todos los ejemplos, que el `user` contenga la
-transcripción y que se utilice el modelo configurado. La respuesta simulada se
-identifica expresamente como tal. El directorio de datos habitual no se modifica.
 
 ### Con una llamada real a OpenAI
 
@@ -196,11 +174,6 @@ Usa la configuración de `.env` o del entorno. Ejecuta las mismas comprobaciones
 y envía una única petición al proveedor, con los reintentos desactivados. El
 resultado real debe tener texto y superar el contrato de respuesta de la API.
 
-Opciones para usar otro archivo y elegir la carpeta de salida:
-
-```powershell
-uv run python scripts/validate_pipeline.py --transcription docs/transcripcion_reunion.md --output-dir artifacts/ejercicio
-```
 
 Cada ejecución escribe un informe `pipeline-<modo>-<fecha>.json`. Si completa el
 flujo, escribe también `estimation-<modo>-<fecha>.md`. El informe incluye modo,
@@ -208,31 +181,6 @@ comprobaciones, cantidad de pruebas, huella del archivo de entrada, estado HTTP,
 modelo y duración. No incluye la clave ni la transcripción completa. La estimación
 Markdown puede reflejar información del texto utilizado.
 
-### GitHub Actions
-
-El workflow [.github/workflows/validate.yml](.github/workflows/validate.yml)
-ejecuta automáticamente el pipeline simulado en **Ubuntu y Windows con Python
-3.11**, en cada `push` y `pull_request`. Instala las dependencias fijadas en
-`uv.lock` y adjunta los resultados como artefactos durante siete días.
-
-Para habilitar una prueba real manual en un repositorio de GitHub:
-
-1. Sube el contenido de **esta carpeta `estimador-cag` como raíz del repositorio**;
-   `.github/workflows` debe estar directamente en la raíz.
-2. Crea el secreto de Actions `OPENAI_API_KEY` en la configuración del repositorio.
-3. Opcionalmente, define la variable de Actions `LLM_MODEL`.
-4. Abre **Actions → Validar estimador CAG → Run workflow**, selecciona la rama
-   predeterminada y activa `live_llm`.
-
-La llamada real se ejecuta solo mediante esa acción manual, desde la rama
-predeterminada y después de pasar las validaciones automáticas. Las peticiones
-de cambio no reciben la clave. Crear el workflow localmente lo deja preparado;
-la ejecución en GitHub empieza cuando exista el repositorio remoto con el archivo.
-
-Se utilizan [checkout](https://github.com/actions/checkout),
-[setup-python](https://github.com/actions/setup-python),
-[setup-uv](https://github.com/astral-sh/setup-uv) y
-[upload-artifact](https://github.com/actions/upload-artifact).
 
 ## Configuración y datos guardados
 
@@ -248,21 +196,13 @@ El entorno tiene prioridad sobre `.env`, y este sobre los valores predeterminado
 de `config.py`. Reinicia la aplicación cuando cambies la configuración.
 
 Las ideas, transcripciones, notas e historial se guardan en SQLite dentro de
-`data/`; persisten al recargar la página y al reiniciar el servidor. `.env`,
-`data/` y `artifacts/` están excluidos de Git. La clave se utiliza en el servidor
-y no se entrega al navegador. El texto enviado a estimar sí se transmite a OpenAI.
+`data/`; persisten al recargar la página. El texto enviado a estimar  se transmite a OpenAI.
 
 Esta versión está preparada para uso local, sin cuentas ni separación de datos
 entre usuarios. Ejecuta un único proceso de servidor para el ejercicio. Si una
 generación se interrumpe al reiniciar, queda registrada como fallida para poder
 revisarla y volver a intentarlo desde la idea.
 
-## Problemas habituales
 
-- **`ModuleNotFoundError`:** ejecuta `uv sync --locked` y arranca con `uv run`,
-  para utilizar el entorno del proyecto.
-- **Puerto ocupado:** sustituye `8001` por otro puerto libre en el comando y la URL.
-- **Clave o modelo no válidos:** revisa `.env`, guárdalo y reinicia el servidor.
-  `/health` solo comprueba la aplicación; una generación real verifica el proveedor.
-- **Respuesta incompleta o límite de API:** la web muestra el error; la transcripción
-  guardada y las versiones anteriores siguen disponibles para volver a intentarlo.
+
+
