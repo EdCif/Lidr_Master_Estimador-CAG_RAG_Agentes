@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#172c47">
+  <title>Estimador CAG · Tus ideas</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%23172c47'/%3E%3Cpath d='M10 28V12h8v9h5V8h7v20' fill='none' stroke='%236bdbbd' stroke-width='3'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/assets/styles.css">
+  <script src="/assets/app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">Ir al contenido</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Ideas guardadas">
+      <a class="brand" href="/" aria-label="Estimador CAG, inicio">
+        <span class="brand-icon" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M5 25V11h7v8h6V5h8v20"/></svg></span>
+        <span>Estimador <b>CAG</b><small>De la idea al plan</small></span>
+      </a>
+      <button id="new-idea" class="button new-button" type="button"><span aria-hidden="true">＋</span> Nueva idea</button>
+      <div class="library-title"><h2>Mis ideas</h2><span id="idea-count" class="count">0</span></div>
+      <label class="search-field"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="search" type="search" placeholder="Buscar una idea" aria-label="Buscar una idea"></label>
+      <label class="sr-only" for="status-filter">Filtrar por estado</label>
+      <select id="status-filter" class="sidebar-select"><option value="all">Todos los estados</option><option value="draft">Idea</option><option value="in_review">En revisión</option><option value="planned">Planificada</option><option value="done">Completada</option></select>
+      <div id="idea-list" class="idea-list" aria-live="polite"><p class="sidebar-empty">Cargando tus ideas…</p></div>
+      <div class="sidebar-footer"><span class="storage-dot" aria-hidden="true"></span><div>Tu espacio de trabajo<small>Ideas guardadas en este equipo</small></div><a href="/docs" target="_blank" rel="noopener" aria-label="Abrir documentación de la API">API ↗</a></div>
+    </aside>
+
+    <main id="workspace" class="workspace">
+      <header class="workspace-header">
+        <div><p class="eyebrow">ESPACIO DE IDEAS</p><h1 id="page-title">Dale forma a tu próxima idea</h1><p id="page-subtitle" class="subtitle">Empieza con una reunión. Conviértela en una estimación que puedas seguir.</p></div>
+        <span id="connection" class="connection"><span class="dot" aria-hidden="true"></span><span id="connection-text">Conectando…</span></span>
+      </header>
+
+      <section class="flow-strip" aria-label="Cómo funciona"><span><b>01</b> Añade tu reunión</span><i aria-hidden="true">→</i><span><b>02</b> Estima con referencias</span><i aria-hidden="true">→</i><span><b>03</b> Revisa y haz seguimiento</span></section>
+
+      <div id="notice" class="notice" role="alert" hidden><span id="notice-text"></span><button id="dismiss-notice" type="button" aria-label="Cerrar aviso">×</button></div>
+
+      <div class="document-toolbar">
+        <div class="tabs" role="tablist" aria-label="Secciones de la idea">
+          <button id="tab-prepare" class="tab active" type="button" role="tab" aria-selected="true" aria-controls="panel-prepare" data-tab="prepare">Preparar</button>
+          <button id="tab-estimation" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-estimation" tabindex="-1" data-tab="estimation">Estimación <span id="run-count" class="tab-count">0</span></button>
+          <button id="tab-followup" class="tab" type="button" role="tab" aria-selected="false" aria-controls="panel-followup" tabindex="-1" data-tab="followup">Seguimiento</button>
+        </div>
+        <div class="toolbar-actions">
+          <span id="save-state" class="save-state" role="status">Borrador sin guardar</span>
+          <div class="primary-actions"><button id="save-idea" class="button button-secondary" type="button">Guardar idea</button><button id="generate" class="button button-primary" type="button"><span class="generate-label">Generar estimación</span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg></button></div>
+        </div>
+      </div>
+
+      <section id="panel-prepare" class="tab-panel" role="tabpanel" aria-labelledby="tab-prepare">
+        <div class="editor-grid">
+          <section class="card editor-card">
+            <div class="section-heading"><div><h2>Cuéntanos qué quieres construir</h2><p>Un poco de contexto ayuda a definir mejor el alcance.</p></div><span class="section-number" aria-hidden="true">01</span></div>
+            <label for="idea-title">Nombre de la idea <span class="required">*</span></label>
+            <input id="idea-title" class="field" maxlength="200" placeholder="Ej. Portal de reservas para mis clientes" autocomplete="off" required>
+            <label for="idea-description">¿Qué problema quieres resolver? <span class="optional">Opcional</span></label>
+            <textarea id="idea-description" class="field" rows="2" maxlength="20000" placeholder="Resume el objetivo de la idea para tenerlo siempre a mano."></textarea>
+            <div class="transcription-heading"><label for="transcription">Transcripción de la reunión <span class="required">*</span></label><button id="import-file" class="text-button" type="button">↑ Importar archivo</button></div>
+            <input id="file-input" type="file" accept=".txt,.md,text/plain,text/markdown" hidden>
+            <textarea id="transcription" class="field transcription" maxlength="200000" placeholder="Pega aquí lo que hablasteis en la reunión: necesidades, funcionalidades, restricciones, plazos y dudas pendientes…" aria-describedby="transcription-help"></textarea>
+            <div class="field-footer"><span id="transcription-help">Texto o Markdown · hasta 200.000 caracteres</span><span id="character-count">0 caracteres</span></div>
+            <p class="input-note">Incluye en la transcripción toda la información que deba tener en cuenta la estimación.</p>
+          </section>
+          <aside class="guidance-column">
+            <section class="reference-card"><span class="mini-label">ESTIMACIÓN CON CONTEXTO</span><div class="reference-symbol" aria-hidden="true"><span></span><span></span><span></span></div><h2>Tu reunión, con una base de experiencia.</h2><p>El modelo recibe tu transcripción junto con <strong id="reference-count">2 ejemplos de estimaciones</strong> para orientar el desglose.</p><ul class="check-list"><li>Alcance y supuestos</li><li>Tareas y esfuerzo estimado</li><li>Riesgos y preguntas pendientes</li></ul><div class="model-label"><span class="dot" aria-hidden="true"></span><span id="model-name">Cargando modelo…</span></div></section>
+            <section class="sample-card"><span class="sample-icon" aria-hidden="true">↗</span><h3>Prueba con una idea de ejemplo</h3><p>Carga una reunión ficticia sobre un portal de reservas y recorre el proceso completo.</p><button id="load-sample" class="text-button" type="button">Cargar reunión de ejemplo <span aria-hidden="true">→</span></button></section>
+            <p class="help-note">Cada estimación se guarda como una versión. Puedes ajustar la transcripción y generar otra cuando tengas más información.</p>
+          </aside>
+        </div>
+      </section>
+
+      <section id="panel-estimation" class="tab-panel" role="tabpanel" aria-labelledby="tab-estimation" hidden>
+        <div id="generation-progress" class="progress-card" role="status" hidden><span class="spinner" aria-hidden="true"></span><div><h2>Preparando tu estimación</h2><p>El modelo está analizando la reunión y las estimaciones de referencia. Puede tardar un momento.</p></div></div>
+        <div id="estimation-empty" class="card empty-state"><div class="empty-symbol" aria-hidden="true">≋</div><h2>Tu idea todavía no tiene una estimación</h2><p>Añade la transcripción y genera una primera versión. Aquí podrás revisarla, copiarla y descargarla.</p><button id="go-prepare" class="button button-primary" type="button">Preparar la idea <span aria-hidden="true">→</span></button></div>
+        <div id="estimation-content" hidden>
+          <div class="result-toolbar"><div><label for="version-select">Versión de la estimación</label><select id="version-select" class="field"></select></div><div class="result-actions"><button id="copy-estimation" class="button button-secondary" type="button">Copiar</button><button id="download-estimation" class="button button-secondary" type="button">↓ Descargar .md</button></div></div>
+          <article class="card result-card"><div class="result-heading"><span id="result-badge" class="status-badge"></span><span id="result-meta" class="muted"></span></div><div id="result-body" class="markdown"></div><details id="snapshot-details" class="snapshot"><summary>Ver transcripción utilizada en esta versión</summary><pre id="snapshot-text"></pre></details></article>
+          <div class="result-footnote"><p>Revisa los supuestos, el alcance y las horas antes de usar esta estimación como compromiso.</p><button id="go-followup" type="button" class="text-button">Anotar próximos pasos →</button></div>
+        </div>
+      </section>
+
+      <section id="panel-followup" class="tab-panel" role="tabpanel" aria-labelledby="tab-followup" hidden>
+        <div class="followup-grid">
+          <section class="card editor-card"><div class="section-heading"><div><h2>¿En qué punto está la idea?</h2><p>Guarda decisiones y próximos pasos para retomarla después.</p></div><span class="section-number" aria-hidden="true">03</span></div><label for="idea-status">Estado</label><select id="idea-status" class="field"><option value="draft">Idea</option><option value="in_review">En revisión</option><option value="planned">Planificada</option><option value="done">Completada</option></select><label for="idea-notes">Notas y próximos pasos</label><textarea id="idea-notes" class="field notes" rows="10" maxlength="20000" placeholder="Ej. Validar el alcance con el equipo, confirmar la integración de pagos y revisar las horas de pruebas."></textarea><div class="editor-actions"><span id="updated-at" class="muted"></span><button id="save-followup" class="button button-primary" type="button">Guardar seguimiento</button></div></section>
+          <section class="card history-card"><h2>Historial de estimaciones</h2><p class="muted">Todas las versiones, en un mismo lugar.</p><div id="history-list" class="history-list"><p class="history-empty">Cuando generes una estimación, aparecerá aquí.</p></div></section>
+        </div>
+      </section>
+      <footer class="workspace-footer"><span>Estimador CAG</span><span>Contexto → Modelo → Estimación</span></footer>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status" hidden></div>
+</body>
+</html>

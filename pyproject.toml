@@ -1,0 +1,12 @@
+[project]
+name = "estimador-cag"
+version = "0.1.0"
+description = "Estimador con configuración centralizada e integración con OpenAI."
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "openai>=2,<3",
+    "pydantic>=2.7,<3",
+    "pydantic-settings>=2.2,<3",
+    "uvicorn>=0.30,<1",
+]

@@ -1,0 +1,18 @@
+# NO GIT - Credenciales y configuración local.
+.env
+.env.*
+!.env.example
+
+# NO GIT - Entorno virtual y archivos generados por Python.
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# Datos locales e informes generados por el pipeline.
+data/
+artifacts/
