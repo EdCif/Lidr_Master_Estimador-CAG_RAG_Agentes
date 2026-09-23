@@ -20,10 +20,12 @@ del script. Por eso:
   abierta.
 * El historial se vuelve a dibujar en cada ejecución recorriendo esa lista.
 
-El fichero está dividido en secciones numeradas. Tras este paso la respuesta
-llega en streaming (token a token) y cada petición lleva el contexto CAG de
-la sesión 1 como mensaje "system". El panel lateral se añade en el paso
-siguiente de la sesión.
+El fichero está dividido en secciones numeradas: configuración, estado,
+contexto CAG y llamada al modelo, historial, entrada del usuario y panel
+lateral. La respuesta llega en streaming (token a token), cada petición lleva
+el contexto CAG de la sesión 1 como mensaje "system", y el panel lateral
+muestra ese system prompt, los ejemplos CAG y las métricas de la última
+llamada.
 """
 
 # ---------------------------------------------------------------------------
@@ -42,6 +44,11 @@ from app.config import get_settings
 # estimación + ejemplos de referencia (contexto CAG). Es la misma función que
 # usa la app FastAPI, así que las dos interfaces estiman con idénticas reglas.
 from app.services.llm_service import build_system_prompt
+
+# Los ejemplos CAG en crudo (lista de diccionarios). build_system_prompt() ya
+# los incrusta en el system prompt; aquí los importamos solo para mostrarlos
+# en el panel lateral como JSON navegable.
+from app.context.examples import ESTIMATION_EXAMPLES
 
 # Anclaje al modelo. litellm usa el formato "<proveedor>/<modelo>": el prefijo
 # "anthropic/" le indica que hable con la API de Anthropic. Cambiar de modelo
@@ -206,25 +213,35 @@ def format_int(value: int) -> str:
     return f"{value:,}".replace(",", ".")
 
 
-def render_metrics(metrics: dict[str, object] | None) -> None:
+def render_metrics(metrics: dict[str, object] | None, per_row: int = 5) -> None:
     """Dibuja las métricas de la última llamada en columnas legibles.
 
     st.columns reparte el ancho disponible en columnas (la lista indica el
     peso relativo de cada una: la del modelo es el doble de ancha porque su
     texto es más largo). st.metric muestra dentro de cada columna un rótulo
-    pequeño y el valor en grande. Esta función se reutilizará en el panel
-    lateral en el siguiente paso.
+    pequeño y el valor en grande.
+
+    ``per_row`` controla cuántas métricas van en cada fila: 5 bajo la
+    respuesta (ancho completo) y 1 en el panel lateral, que es estrecho.
+    La función dibuja donde se la llame: si se invoca dentro de
+    ``with st.sidebar:``, las columnas aparecen en el panel lateral.
     """
     if not metrics:
         st.caption("Sin llamadas todavía.")
         return
 
-    col_model, col_in, col_out, col_first, col_total = st.columns([2, 1, 1, 1, 1])
-    col_model.metric("Modelo", metrics["model"])
-    col_in.metric("Tokens entrada", format_int(metrics["input_tokens"]))
-    col_out.metric("Tokens salida", format_int(metrics["output_tokens"]))
-    col_first.metric("Primer token", f"{metrics['first_token_s']:.1f} s")
-    col_total.metric("Tiempo total", f"{metrics['total_s']:.1f} s")
+    items = [
+        ("Modelo", metrics["model"]),
+        ("Tokens entrada", format_int(metrics["input_tokens"])),
+        ("Tokens salida", format_int(metrics["output_tokens"])),
+        ("Primer token", f"{metrics['first_token_s']:.1f} s"),
+        ("Tiempo total", f"{metrics['total_s']:.1f} s"),
+    ]
+    for start in range(0, len(items), per_row):
+        row = items[start : start + per_row]
+        weights = [2 if label == "Modelo" else 1 for label, _ in row]
+        for column, (label, value) in zip(st.columns(weights), row):
+            column.metric(label, value)
 
 
 # ---------------------------------------------------------------------------
@@ -269,3 +286,40 @@ if prompt:
     #     En el paso del panel lateral se mostrarán también allí.
     st.divider()
     render_metrics(st.session_state.last_metrics)
+
+# ---------------------------------------------------------------------------
+# 6. Panel lateral
+# ---------------------------------------------------------------------------
+# st.sidebar es un contenedor fijo a la izquierda. Todo lo que se dibuje
+# dentro de "with st.sidebar:" aparece ahí, sin importar en qué punto del
+# script se escriba. Lo colocamos al FINAL a propósito: así, cuando el
+# usuario acaba de enviar un mensaje, el panel se dibuja después de que el
+# generador haya dejado las métricas de esa misma llamada en session_state.
+with st.sidebar:
+    st.header("Panel de control")
+
+    # a) System prompt activo. st.expander lo pliega para no ocupar toda la
+    #    columna; st.text lo muestra tal cual, sin interpretar el Markdown ni
+    #    el JSON que contiene.
+    with st.expander("System prompt activo"):
+        st.caption(f"{len(SYSTEM_PROMPT):,} caracteres".replace(",", "."))
+        st.text(SYSTEM_PROMPT)
+
+    # b) Contexto CAG: los ejemplos de referencia como JSON navegable.
+    #    expanded=1 despliega solo el primer nivel (un bloque por ejemplo).
+    with st.expander(f"Contexto CAG · {len(ESTIMATION_EXAMPLES)} ejemplos"):
+        st.json(ESTIMATION_EXAMPLES, expanded=1)
+
+    # c) Métricas de la última llamada, una por fila porque el panel es
+    #    estrecho. Persisten entre ejecuciones gracias a session_state.
+    st.subheader("Última llamada")
+    render_metrics(st.session_state.last_metrics, per_row=1)
+
+    # d) Reiniciar la conversación. st.button devuelve True solo en la
+    #    ejecución en la que se pulsa; vaciamos el estado y forzamos una nueva
+    #    ejecución del script con st.rerun() para que la pantalla se limpie.
+    st.divider()
+    if st.button("Nueva conversación", type="primary", width="stretch"):
+        st.session_state.messages = []
+        st.session_state.last_metrics = None
+        st.rerun()
