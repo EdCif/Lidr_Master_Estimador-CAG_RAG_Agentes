@@ -273,8 +273,29 @@ if prompt:
     #     st.write_stream consume el generador: pinta cada fragmento en cuanto
     #     llega (efecto "escribiendo") y, al terminar, devuelve el texto
     #     completo ya concatenado, que es lo que guardamos en el historial.
-    with st.chat_message("assistant"):
-        answer = st.write_stream(stream_model(st.session_state.messages))
+    #
+    #     Los errores del proveedor se capturan del más concreto al más
+    #     general. Si algo falla, retiramos el mensaje del usuario del
+    #     historial para que pueda reintentarlo sin que quede "huérfano".
+    try:
+        with st.chat_message("assistant"):
+            answer = st.write_stream(stream_model(st.session_state.messages))
+    except litellm.AuthenticationError:
+        st.session_state.messages.pop()
+        st.error("La clave ANTHROPIC_API_KEY no es válida. Revísala en el .env y reinicia la app.")
+        st.stop()
+    except litellm.RateLimitError:
+        st.session_state.messages.pop()
+        st.error("Se ha alcanzado el límite de peticiones de la API. Espera unos segundos y reintenta.")
+        st.stop()
+    except (litellm.APIConnectionError, litellm.Timeout):
+        st.session_state.messages.pop()
+        st.error("No se pudo conectar con la API de Anthropic. Comprueba la conexión y reintenta.")
+        st.stop()
+    except litellm.APIError as error:
+        st.session_state.messages.pop()
+        st.error(f"El proveedor devolvió un error: {error.__class__.__name__}. Reintenta en unos momentos.")
+        st.stop()
 
     # 5.3 Guardamos la respuesta para las próximas ejecuciones. Las métricas ya
     #     las dejó el generador en st.session_state.last_metrics.

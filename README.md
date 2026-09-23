@@ -62,6 +62,45 @@ El ejemplo de reunión es ficticio y trata de un módulo de reservas de salas. E
 versionado junto con este README para que todas las personas usen la misma entrada
 durante el ejercicio. La web y el pipeline leen ese mismo archivo.
 
+## Sesión 2 · Interfaz conversacional con Streamlit
+
+Segunda interfaz, independiente de la web FastAPI, que envía la transcripción a
+**Claude Sonnet 5** a través de **litellm** y reutiliza el mismo contexto CAG
+(`build_system_prompt()` y `ESTIMATION_EXAMPLES` de la sesión 1).
+
+Añade a tu `.env` local la clave de Anthropic (nunca la subas al repositorio):
+
+```dotenv
+ANTHROPIC_API_KEY=tu_clave_de_Anthropic
+```
+
+Inicia la aplicación desde la carpeta `estimador-cag`:
+
+```powershell
+uv sync --locked
+uv run streamlit run streamlit_app.py
+```
+
+Abre **[http://localhost:8501](http://localhost:8501)**. La web FastAPI sigue
+disponible por separado en el puerto 8001. Detén Streamlit con `Ctrl+C`.
+
+Qué incluye `streamlit_app.py`:
+
+| Elemento | Implementación |
+| --- | --- |
+| Chat e historial | `st.chat_input`, `st.chat_message` y `st.session_state` |
+| Modelo anclado | `anthropic/claude-sonnet-5` mediante `litellm.completion` |
+| Respuesta en streaming | Generador con `stream=True` consumido por `st.write_stream` |
+| Contexto CAG | Mensaje `system` con instrucciones y ejemplos en cada petición |
+| Panel lateral | `st.sidebar` con system prompt activo, ejemplos CAG y métricas |
+| Métricas | Modelo, tokens de entrada y salida, primer token y tiempo total |
+| Errores | Clave inválida, límite de peticiones, conexión y errores del proveedor |
+
+El historial se envía completo en cada petición, así que se pueden pedir
+ajustes sobre una estimación anterior. El botón **Nueva conversación** del
+panel lateral vacía el historial y las métricas. Cada mensaje consume la API
+de Anthropic.
+
 ## Arquitectura y capa de responsabilidades
 
 ```text
