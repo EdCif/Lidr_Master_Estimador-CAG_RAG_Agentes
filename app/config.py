@@ -45,11 +45,26 @@ class Settings(BaseSettings):
     # SecretStr oculta la clave al imprimir o representar la configuración.
     openai_api_key: SecretStr = Field(min_length=1)
 
+    # Sesión 2 · Opcional: clave de Anthropic para la interfaz Streamlit
+    # (streamlit_app.py llama a Claude Sonnet 5 a través de litellm).
+    # Es opcional (None por defecto) para que la app FastAPI de la sesión 1
+    # siga arrancando aunque solo exista OPENAI_API_KEY.
+    anthropic_api_key: SecretStr | None = None
+
     @field_validator("openai_api_key", "llm_model", mode="before")
     @classmethod
     def strip_openai_values(cls, value: object) -> object:
         """Elimina espacios exteriores y permite detectar valores en blanco."""
         return value.strip() if isinstance(value, str) else value
+
+    @field_validator("anthropic_api_key", mode="before")
+    @classmethod
+    def blank_anthropic_key_is_none(cls, value: object) -> object:
+        """Una ANTHROPIC_API_KEY vacía o con solo espacios equivale a no tenerla."""
+        if isinstance(value, str):
+            value = value.strip()
+            return value or None
+        return value
 
     @field_validator("data_dir")
     @classmethod
@@ -70,3 +85,4 @@ if __name__ == "__main__":
     print("Proveedor:", settings.llm_provider)
     print("Modelo:", settings.llm_model)
     print("Clave cargada:", bool(settings.openai_api_key.get_secret_value()))
+    print("Clave Anthropic cargada:", settings.anthropic_api_key is not None)
