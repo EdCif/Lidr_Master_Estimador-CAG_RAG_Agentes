@@ -3,6 +3,20 @@
 .env.*
 !.env.example
 
+# NO GIT - Claves y certificados sueltos, por si alguno acaba en la carpeta.
+*.pem
+*.key
+secrets/
+
+# NO GIT - Notas de trabajo con Claude Code. Son nuestro cuaderno interno
+# (qué se hizo, por qué y cómo se arreglaron los errores); no forman parte
+# del entregable que ve el profesor en GitHub.
+CLAUDE.md
+CLAUDE.local.md
+estado_proyecto.md
+automejora.md
+.claude/
+
 # NO GIT - Entorno virtual y archivos generados por Python.
 .venv/
 __pycache__/
