@@ -13,6 +13,7 @@ from app.context.examples import ESTIMATION_EXAMPLES
 from app.errors import install_error_handlers
 from app.routers.estimations import router as estimations_router
 from app.routers.ideas import router as ideas_router
+from app.routers.sessions import router as sessions_router
 from app.services.idea_service import init_store, recover_running_runs
 
 
@@ -36,6 +37,8 @@ app = FastAPI(
 install_error_handlers(app)
 app.include_router(estimations_router)
 app.include_router(ideas_router)
+# Sesión 05: conversaciones con historial y memoria (POST /sessions...).
+app.include_router(sessions_router)
 app.mount("/assets", StaticFiles(directory=WEB_DIR), name="assets")
 
 
