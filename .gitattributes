@@ -1,0 +1,8 @@
+# Documentos de ejemplo: git no debe tocar sus saltos de línea. Un PDF
+# escrito solo con texto parece un fichero de texto, y en Windows git le
+# cambiaría LF por CRLF al descargarlo, desplazando las posiciones internas
+# del PDF y dejándolo corrupto.
+*.pdf binary
+*.docx binary
+*.png binary
+*.gif binary
