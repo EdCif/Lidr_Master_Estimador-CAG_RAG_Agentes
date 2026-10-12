@@ -2,19 +2,38 @@
 
 Igual que el resto de routers, esta capa solo recibe la petición, delega y
 devuelve. La lógica del historial y de la memoria está en
-``app/services/sessions.py``.
+``app/services/sessions.py`` y la de cada turno en
+``app/services/conversation_service.py``.
 
 Las rutas cuelgan de /sessions, sin el prefijo /api/v1 que usan las de las
 sesiones anteriores, porque así las define el enunciado de la sesión 05. Los
 endpoints antiguos no se tocan y siguen funcionando igual.
+
+Por qué casi todo se comprueba en dependencias (Depends)
+--------------------------------------------------------
+POST /sessions/{id}/estimate responde en streaming (Server-Sent Events). En
+cuanto el generador del endpoint suelta su primer evento, la respuesta ya ha
+salido con un 200 y no hay forma de cambiar ese código. Por eso todo lo que
+puede fallar de antemano (que la sesión exista, que la transcripción no
+esté vacía, que los adjuntos sean PDF o Word y no pesen demasiado, que haya
+clave de Anthropic) se comprueba en dependencias. FastAPI las ejecuta
+ANTES de abrir el stream, así que si algo falla el cliente recibe un 404,
+413, 415, 422 o 503 de verdad. Lo que solo puede fallar durante el turno
+(el proveedor cae, un PDF no tiene texto) llega como un evento ``error``.
 """
 
+from collections.abc import AsyncIterable
 from functools import lru_cache
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.sse import EventSourceResponse, ServerSentEvent
 
+from app.config import get_settings
 from app.schemas.session import SessionCreated, SessionState
+from app.services.attachments.common import Attachment, AttachmentError, validate_attachment
+from app.services.conversation_service import AttachmentMode, TurnSettings, stream_estimation_turn
 from app.services.llm_service import build_system_prompt
 from app.services.sessions import (
     ProjectMetadata,
@@ -58,8 +77,15 @@ def get_session_store() -> SessionStore:
     return SessionStore(system_prompt_builder=provisional_prompt_builder)
 
 
-def get_session_or_404(session_id: UUID, store: SessionStore) -> Session:
-    """Busca la sesión y, si no existe, responde 404 con una explicación útil.
+# ---------------------------------------------------------------------------
+# Dependencias: comprobaciones que se hacen ANTES de abrir el stream
+# ---------------------------------------------------------------------------
+
+def get_existing_session(
+    session_id: UUID,
+    store: SessionStore = Depends(get_session_store),
+) -> Session:
+    """Busca la sesión de la URL y, si no existe, responde 404 con una pista útil.
 
     Declarar session_id como UUID hace que FastAPI rechace con un 422 los
     identificadores mal formados antes de llegar aquí. str(session_id) lo
@@ -76,6 +102,84 @@ def get_session_or_404(session_id: UUID, store: SessionStore) -> Session:
                 "o se ha superado el límite de sesiones). Crea una nueva con POST /sessions."
             ),
         ) from None
+
+
+def read_transcript(
+    transcript: Annotated[str, Form(
+        description="Transcripción de la reunión, o el siguiente mensaje de la conversación.",
+        max_length=200_000,
+    )],
+) -> str:
+    """Lee el campo ``transcript`` del formulario y rechaza los vacíos."""
+    text = transcript.strip()
+    if not text:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "La transcripción no puede estar vacía.")
+    return text
+
+
+async def read_attachments(
+    attachments: Annotated[list[UploadFile] | None, File(
+        description="Documentación complementaria opcional: PDF o Word (.docx).",
+    )] = None,
+    settings=Depends(get_settings),
+) -> list[Attachment]:
+    """Lee los ficheros adjuntos, comprueba cuántos son, su tamaño y su formato.
+
+    Leemos los bytes aquí, al principio, y no dentro del stream: así los
+    errores salen con su código HTTP y no dependemos de que el fichero
+    temporal siga abierto mientras dura la respuesta.
+    """
+    # Algunos clientes mandan un "fichero" vacío y sin nombre cuando el
+    # usuario no elige ninguno. Lo descartamos.
+    files = [file for file in (attachments or []) if file.filename]
+    if len(files) > settings.max_attachments:
+        raise HTTPException(
+            status.HTTP_413_CONTENT_TOO_LARGE,
+            f"Se admiten como máximo {settings.max_attachments} adjuntos por petición.",
+        )
+
+    max_bytes = int(settings.max_attachment_mb * 1_048_576)
+    validated: list[Attachment] = []
+    for file in files:
+        # Leemos como mucho un byte más del límite: basta para saber si se
+        # pasa, sin cargar en memoria un fichero de 2 GB que alguien suba por error.
+        data = await file.read(max_bytes + 1)
+        try:
+            validated.append(validate_attachment(file.filename, data, max_bytes))
+        except AttachmentError as error:
+            raise HTTPException(error.status_code, str(error)) from None
+    return validated
+
+
+def resolve_attachment_mode(
+    attachment_mode: Annotated[AttachmentMode | None, Form(
+        description="Camino de los adjuntos: files_api (A) o local (B). Si no se indica, el de ATTACHMENT_MODE.",
+    )] = None,
+    settings=Depends(get_settings),
+) -> AttachmentMode:
+    """El camino elegido en la petición o, si no viene, el configurado en el .env."""
+    return attachment_mode or settings.attachment_mode
+
+
+def require_anthropic_key(settings=Depends(get_settings)) -> str:
+    """Los dos caminos llaman a Claude: sin ANTHROPIC_API_KEY no hay nada que hacer."""
+    if settings.anthropic_api_key is None:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "Falta ANTHROPIC_API_KEY en el .env. Añádela y reinicia la API.",
+        )
+    return settings.anthropic_api_key.get_secret_value()
+
+
+def get_turn_settings(settings=Depends(get_settings)) -> TurnSettings:
+    """Copia de config.py los ajustes que necesita un turno."""
+    return TurnSettings(
+        model=settings.session_llm_model,
+        effort=settings.session_llm_effort,
+        max_tokens=settings.session_max_tokens,
+        pdf_extractor=settings.pdf_extractor,
+        max_attachment_chars=settings.max_attachment_chars,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -95,13 +199,12 @@ async def create_session(store: SessionStore = Depends(get_session_store)):
 
 
 @router.get("/{session_id}", response_model=SessionState)
-async def get_session(session_id: UUID, store: SessionStore = Depends(get_session_store)):
+async def get_session(session: Session = Depends(get_existing_session)):
     """Devuelve la memoria y el historial actuales de una sesión.
 
     Es de solo lectura: consultar una sesión no cambia ni su historial ni su
     ficha (solo la marca como usada, para que no sea la primera en borrarse).
     """
-    session = get_session_or_404(session_id, store)
     return SessionState(
         session_id=session.session_id,
         created_at=session.created_at,
@@ -111,4 +214,42 @@ async def get_session(session_id: UUID, store: SessionStore = Depends(get_sessio
         discarded_turns=session.history.discarded_turns,
         project_metadata=session.metadata,
         history=session.history.messages,
+        uploaded_files=session.uploaded_files,
     )
+
+
+@router.post("/{session_id}/estimate", response_class=EventSourceResponse)
+async def estimate_in_session(
+    session: Session = Depends(get_existing_session),
+    transcript: str = Depends(read_transcript),
+    attachments: list[Attachment] = Depends(read_attachments),
+    attachment_mode: AttachmentMode = Depends(resolve_attachment_mode),
+    api_key: str = Depends(require_anthropic_key),
+    turn_settings: TurnSettings = Depends(get_turn_settings),
+) -> AsyncIterable[ServerSentEvent]:
+    """Estima dentro de una sesión y devuelve la respuesta en streaming (SSE).
+
+    Recibe un formulario multipart/form-data con:
+
+    * ``transcript`` (obligatorio): la transcripción o el siguiente mensaje.
+    * ``attachments`` (opcional, varios): PDF o Word con documentación extra.
+    * ``attachment_mode`` (opcional): ``files_api`` (Camino A) o ``local`` (B).
+
+    La respuesta es un stream de eventos ``status``, ``delta`` (trozos de la
+    estimación), y al final ``done`` o ``error``. El historial de la sesión
+    se actualiza solo cuando llega el ``done``.
+
+    Al usar ``response_class=EventSourceResponse`` con un generador, FastAPI
+    convierte cada ServerSentEvent al formato del protocolo SSE
+    (``event: ...`` / ``data: ...``) y además envía pings periódicos para que
+    la conexión no se corte mientras el modelo piensa.
+    """
+    async for turn_event in stream_estimation_turn(
+        session=session,
+        transcript=transcript,
+        attachments=attachments,
+        mode=attachment_mode,
+        settings=turn_settings,
+        api_key=api_key,
+    ):
+        yield ServerSentEvent(event=turn_event.event, data=turn_event.data)

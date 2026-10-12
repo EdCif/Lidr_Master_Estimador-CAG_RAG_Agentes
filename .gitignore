@@ -16,6 +16,7 @@ CLAUDE.local.md
 estado_proyecto.md
 automejora.md
 .claude/
+planes/
 
 # NO GIT - Entorno virtual y archivos generados por Python.
 .venv/

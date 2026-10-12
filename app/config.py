@@ -6,6 +6,7 @@ La configuración se valida la primera vez que se llama a ``get_settings()``.
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -50,6 +51,31 @@ class Settings(BaseSettings):
     # Es opcional (None por defecto) para que la app FastAPI de la sesión 1
     # siga arrancando aunque solo exista OPENAI_API_KEY.
     anthropic_api_key: SecretStr | None = None
+
+    # Sesión 05 · Conversaciones con memoria y adjuntos (/sessions/...).
+    # Los dos caminos de adjuntos usan el mismo modelo, Claude Opus 5.5, para
+    # que al compararlos la única diferencia sea cómo llegan los documentos.
+    session_llm_model: str = Field(default="claude-opus-5-5", min_length=1)
+    # Cuánto "piensa" Opus 5.5 antes de contestar. Su valor por defecto ya es
+    # "medium"; lo dejamos escrito para que se vea y se pueda cambiar.
+    session_llm_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+    # Techo de tokens de salida (el razonamiento interno también cuenta).
+    # Solo se cobra lo que se genera, así que un techo alto no encarece nada.
+    session_max_tokens: int = Field(default=64000, ge=1024)
+    # Camino de adjuntos por defecto: "local" (B, extraemos el texto aquí) o
+    # "files_api" (A, el PDF se sube a Anthropic y Claude lo lee entero).
+    # Cada petición puede elegir otro con el campo attachment_mode.
+    attachment_mode: Literal["files_api", "local"] = "local"
+    # Camino B: con qué librería sacamos el texto de los PDF. pypdf es rápida
+    # y va bien con PDF de texto normales; MarkItDown devuelve Markdown con
+    # más estructura en documentos complejos. Si pypdf no saca casi nada, se
+    # prueba automáticamente con MarkItDown.
+    pdf_extractor: Literal["pypdf", "markitdown"] = "pypdf"
+    # Límites de los adjuntos, para no tumbar el servidor ni disparar la
+    # factura de tokens con un documento enorme.
+    max_attachments: int = Field(default=5, ge=0)
+    max_attachment_mb: float = Field(default=10, gt=0)
+    max_attachment_chars: int = Field(default=300_000, ge=1000)
 
     @field_validator("openai_api_key", "llm_model", mode="before")
     @classmethod

@@ -342,6 +342,10 @@ class Session:
             system_prompt_factory=lambda: system_prompt_builder(self.metadata),
             max_turns=max_turns,
         )
+        # Camino A: ficheros que esta sesión ha subido a la Files API de
+        # Anthropic ({"filename": ..., "file_id": ...}). Solo es informativo,
+        # para poder verlos con GET /sessions/{id}; caducan solos a las 24 h.
+        self.uploaded_files: list[dict[str, str]] = []
 
     def touch(self) -> None:
         """Marca la sesión como usada ahora mismo."""

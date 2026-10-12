@@ -41,3 +41,7 @@ class SessionState(BaseModel):
     history: list[dict[str, Any]] = Field(
         description="Historial: mensajes user/assistant dentro de la ventana, sin system prompt."
     )
+    uploaded_files: list[dict[str, str]] = Field(
+        default_factory=list,
+        description="Camino A: ficheros subidos a la Files API (nombre y file_id).",
+    )

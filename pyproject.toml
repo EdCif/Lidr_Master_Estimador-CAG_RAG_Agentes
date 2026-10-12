@@ -4,13 +4,17 @@ version = "0.1.0"
 description = "Estimador con configuración centralizada e integración con OpenAI."
 requires-python = ">=3.10"
 dependencies = [
+    "anthropic>=1.11.0",
     "chainlit>=2.12.0",
     "fastapi>=0.115,<1",
     "gradio>=6.28.0",
     "litellm>=1.102.0",
+    "markitdown[pdf]>=0.1.8",
     "openai>=2,<3",
     "pydantic>=2.7,<3",
     "pydantic-settings>=2.2,<3",
+    "pypdf>=6.19.0",
+    "python-docx>=1.2.0",
     "streamlit>=1.64.0",
     "uvicorn>=0.30,<1",
 ]

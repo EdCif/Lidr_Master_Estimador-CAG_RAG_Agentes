@@ -1,0 +1,112 @@
+%PDF-1.4
+%âãÏÓ
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [6 0 R 8 0 R] /Count 2 >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>
+endobj
+5 0 obj
+<< /Length 2421 >>
+stream
+BT /F2 15 Tf 56 760 Td (Especificación técnica · Portal de reservas de espacios) Tj ET
+BT /F1 9 Tf 56 739 Td (Documento ficticio creado para el ejercicio de la sesión 5. No describe una organización real.) Tj ET
+BT /F2 11 Tf 56 716 Td (1. Equipo disponible) Tj ET
+BT /F1 10 Tf 56 699 Td (El proyecto contará con un equipo de 3 personas: una persona de backend, una de frontend) Tj ET
+BT /F1 10 Tf 56 683 Td (y una persona de QA a media jornada. No hay diseñador asignado: se reutiliza el sistema de diseño.) Tj ET
+BT /F2 11 Tf 56 659 Td (2. Stack tecnológico existente) Tj ET
+BT /F1 10 Tf 56 642 Td (- Frontend: React 18 con TypeScript y la librería de componentes interna.) Tj ET
+BT /F1 10 Tf 56 626 Td (- Backend: FastAPI \(Python 3.12\) con SQLAlchemy y PostgreSQL 15.) Tj ET
+BT /F1 10 Tf 56 610 Td (- Tareas en segundo plano: Celery con Redis \(ya en producción\).) Tj ET
+BT /F1 10 Tf 56 594 Td (- Autenticación: SSO corporativo con Microsoft Entra ID \(OpenID Connect\), ya integrado.) Tj ET
+BT /F1 10 Tf 56 578 Td (- Despliegue: contenedores Docker en Kubernetes, con pipeline de GitHub Actions.) Tj ET
+BT /F2 11 Tf 56 554 Td (3. Requisitos acordados después de la reunión) Tj ET
+BT /F1 10 Tf 56 537 Td (a\) Accesibilidad: las pantallas de reserva deben cumplir WCAG 2.1 nivel AA, con una) Tj ET
+BT /F1 10 Tf 56 521 Td (   auditoría externa antes de la entrega.) Tj ET
+BT /F1 10 Tf 56 505 Td (b\) Bloqueo de salas: se resuelve la pregunta abierta. Operaciones podrá bloquear una sala) Tj ET
+BT /F1 10 Tf 56 489 Td (   por mantenimiento o festivo desde un endpoint de administración \(sin pantalla propia\).) Tj ET
+BT /F1 10 Tf 56 473 Td (c\) Exportación: operaciones necesita descargar las reservas de un mes en CSV.) Tj ET
+BT /F1 10 Tf 56 457 Td (d\) Auditoría: cada creación, cambio o cancelación queda registrada con usuario y fecha,) Tj ET
+BT /F1 10 Tf 56 441 Td (   y el historial se conserva 12 meses.) Tj ET
+BT /F2 11 Tf 56 417 Td (4. Requisitos no funcionales) Tj ET
+BT /F1 10 Tf 56 400 Td (- Consulta de disponibilidad en menos de 300 ms con 20 usuarios simultáneos.) Tj ET
+BT /F1 10 Tf 56 384 Td (- Cobertura mínima de pruebas automáticas del backend: 80 %.) Tj ET
+BT /F1 10 Tf 56 368 Td (- Observabilidad: métricas de reservas y errores de correo en el Grafana existente.) Tj ET
+BT /F1 10 Tf 56 344 Td (El diagrama de arquitectura de la página 2 muestra cómo encaja el módulo en el sistema actual.) Tj ET
+endstream
+endobj
+6 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 5 0 R >>
+endobj
+7 0 obj
+<< /Length 1681 >>
+stream
+BT /F2 13 Tf 56 760 Td (Diagrama de arquitectura del módulo de reservas) Tj ET
+BT /F1 9 Tf 56 741 Td (Las flechas indican el sentido de las llamadas. Ficticio, para el ejercicio.) Tj ET
+1 w
+56 560 130 50 re S
+BT /F2 10 Tf 64 594 Td (Navegador) Tj ET
+BT /F1 8 Tf 64 580 Td (escritorio y móvil) Tj ET
+240 560 140 50 re S
+BT /F2 10 Tf 248 594 Td (Frontend React) Tj ET
+BT /F1 8 Tf 248 580 Td (nuevas pantallas) Tj ET
+430 560 130 50 re S
+BT /F2 10 Tf 438 594 Td (Entra ID \(SSO\)) Tj ET
+BT /F1 8 Tf 438 580 Td (ya existe) Tj ET
+240 440 140 50 re S
+BT /F2 10 Tf 248 474 Td (API FastAPI) Tj ET
+BT /F1 8 Tf 248 460 Td (endpoints de reservas) Tj ET
+56 440 130 50 re S
+BT /F2 10 Tf 64 474 Td (PostgreSQL 15) Tj ET
+BT /F1 8 Tf 64 460 Td (reservas + auditoría) Tj ET
+430 440 130 50 re S
+BT /F2 10 Tf 438 474 Td (Celery + Redis) Tj ET
+BT /F1 8 Tf 438 460 Td (cola de tareas) Tj ET
+430 320 130 50 re S
+BT /F2 10 Tf 438 354 Td (Proveedor de correo) Tj ET
+BT /F1 8 Tf 438 340 Td (ya contratado) Tj ET
+240 320 140 50 re S
+BT /F2 10 Tf 248 354 Td (Grafana) Tj ET
+BT /F1 8 Tf 248 340 Td (métricas y alertas) Tj ET
+186 585 m 240 585 l S
+240 585 m 232.6 588.1 l 232.6 581.9 l h f
+380 585 m 430 585 l S
+430 585 m 422.6 588.1 l 422.6 581.9 l h f
+310 560 m 310 490 l S
+310 490 m 313.1 497.4 l 306.9 497.4 l h f
+240 465 m 186 465 l S
+186 465 m 193.4 461.9 l 193.4 468.1 l h f
+380 465 m 430 465 l S
+430 465 m 422.6 468.1 l 422.6 461.9 l h f
+495 440 m 495 370 l S
+495 370 m 498.1 377.4 l 491.9 377.4 l h f
+310 440 m 310 370 l S
+310 370 m 313.1 377.4 l 306.9 377.4 l h f
+BT /F1 9 Tf 56 280 Td (Nuevo en esta entrega: pantallas, endpoints, tabla de reservas, auditoría, plantillas de correo y métricas.) Tj ET
+endstream
+endobj
+8 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents 7 0 R >>
+endobj
+xref
+0 9
+0000000000 65535 f 
+0000000015 00000 n 
+0000000064 00000 n 
+0000000127 00000 n 
+0000000224 00000 n 
+0000000326 00000 n 
+0000002799 00000 n 
+0000002935 00000 n 
+0000004668 00000 n 
+trailer
+<< /Size 9 /Root 1 0 R >>
+startxref
+4804
+%%EOF
