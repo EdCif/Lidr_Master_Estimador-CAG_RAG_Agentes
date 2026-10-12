@@ -35,9 +35,8 @@ from app.config import get_settings
 from app.schemas.session import SessionCreated, SessionState
 from app.services.attachments.common import Attachment, AttachmentError, validate_attachment
 from app.services.conversation_service import AttachmentMode, TurnSettings, stream_estimation_turn
-from app.services.llm_service import build_system_prompt
+from app.services.prompt_builder import build_session_system_prompt
 from app.services.sessions import (
-    ProjectMetadata,
     Session,
     SessionNotFoundError,
     SessionStore,
@@ -50,18 +49,6 @@ router = APIRouter(prefix="/sessions", tags=["sessions"])
 # ---------------------------------------------------------------------------
 # El almacén de sesiones (uno para todo el proceso)
 # ---------------------------------------------------------------------------
-
-def provisional_prompt_builder(metadata: ProjectMetadata) -> str:
-    """System prompt PROVISIONAL, solo hasta el Paso 4.
-
-    De momento devolvemos el system prompt CAG de la sesión 1 tal cual e
-    ignoramos la ficha del proyecto. En el Paso 4 lo cambiaremos por una
-    plantilla Jinja2 que sí meta la ficha en un bloque <project_metadata>.
-    Como el almacén recibe esta función desde fuera, ese cambio será tocar
-    una sola línea en get_session_store().
-    """
-    return build_system_prompt()
-
 
 @lru_cache(maxsize=1)
 def get_session_store() -> SessionStore:
@@ -78,10 +65,15 @@ def get_session_store() -> SessionStore:
     El tamaño de la ventana (MAX_TURNS) y el tope de sesiones (MAX_SESSIONS)
     se leen del .env. Como el almacén se crea una sola vez, un cambio en el
     .env necesita reiniciar la API.
+
+    El system prompt lo monta build_session_system_prompt: la plantilla
+    Jinja2 de app/prompts con la ficha del proyecto (project_metadata) en su
+    bloque <project_metadata>. El almacén recibe la función, no el texto,
+    para que cada sesión lo regenere con su ficha en cada turno.
     """
     settings = get_settings()
     return SessionStore(
-        system_prompt_builder=provisional_prompt_builder,
+        system_prompt_builder=build_session_system_prompt,
         max_turns=settings.max_turns,
         max_sessions=settings.max_sessions,
     )
