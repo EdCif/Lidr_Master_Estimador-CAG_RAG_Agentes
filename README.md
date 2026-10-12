@@ -62,44 +62,46 @@ El ejemplo de reunión es ficticio y trata de un módulo de reservas de salas. E
 versionado junto con este README para que todas las personas usen la misma entrada
 durante el ejercicio. La web y el pipeline leen ese mismo archivo.
 
-## Sesión 2 · Interfaz conversacional con Streamlit
+## Interfaz Streamlit (sesión 5: cliente de la API de sesiones)
 
-Segunda interfaz, independiente de la web FastAPI, que envía la transcripción a
-**Claude Sonnet 5** a través de **litellm** y reutiliza el mismo contexto CAG
-(`build_system_prompt()` y `ESTIMATION_EXAMPLES` de la sesión 1).
+En la sesión 2, Streamlit llamaba al modelo directamente con litellm (esa
+versión sigue en la rama `sesion-02-streamlit`). Desde la sesión 5 es un
+**cliente de la API de sesiones**: la conversación, la memoria, los adjuntos
+y la caducidad los gestiona la API, y Streamlit los muestra.
 
-Añade a tu `.env` local la clave de Anthropic (nunca la subas al repositorio):
+Añade a tu `.env` local la clave de Anthropic (nunca la subas al repositorio).
+Tiene que ser una clave creada **dentro de un espacio de trabajo** (*workspace*)
+de la consola de Anthropic:
 
 ```dotenv
 ANTHROPIC_API_KEY=tu_clave_de_Anthropic
 ```
 
-Inicia la aplicación desde la carpeta `estimador-cag`:
+Arranca, desde la carpeta `estimador-cag`, **dos terminales**:
 
 ```powershell
 uv sync --locked
-uv run streamlit run streamlit_app.py
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8001   # 1) la API
+uv run streamlit run streamlit_app.py                       # 2) la interfaz
 ```
 
-Abre **[http://localhost:8501](http://localhost:8501)**. La web FastAPI sigue
-disponible por separado en el puerto 8001. Detén Streamlit con `Ctrl+C`.
+Abre **[http://localhost:8501](http://localhost:8501)**. Si la API no está
+arrancada, la página lo dice y explica cómo arrancarla.
 
-Qué incluye `streamlit_app.py`:
-
-| Elemento | Implementación |
+| Lo que pide el ejercicio | Cómo lo hace `streamlit_app.py` |
 | --- | --- |
-| Chat e historial | `st.chat_input`, `st.chat_message` y `st.session_state` |
-| Modelo anclado | `anthropic/claude-sonnet-5` mediante `litellm.completion` |
-| Respuesta en streaming | Generador con `stream=True` consumido por `st.write_stream` |
-| Contexto CAG | Mensaje `system` con instrucciones y ejemplos en cada petición |
-| Panel lateral | `st.sidebar` con system prompt activo, ejemplos CAG y métricas |
-| Métricas | Modelo, tokens de entrada y salida, primer token y tiempo total |
-| Errores | Clave inválida, límite de peticiones, conexión y errores del proveedor |
+| a) Crear una sesión al cargar la página | `POST /sessions` y `session_id` guardado en `st.session_state` |
+| b) Texto para la transcripción y selector múltiple de ficheros | `st.form` con `st.text_area`, `st.file_uploader(accept_multiple_files=True)` y la elección de camino (A o B) |
+| c) `project_metadata` visible | Panel lateral con la **memoria** (los datos que cambian en el turno se marcan con 🆕) y, aparte, el **historial**: barra de turnos en la ventana y turnos descartados |
+| d) Botón «Nueva conversación» | Vuelve a llamar a `POST /sessions` y limpia la pantalla |
 
-El historial se envía completo en cada petición, así que se pueden pedir
-ajustes sobre una estimación anterior. El botón **Nueva conversación** del
-panel lateral vacía el historial y las métricas. Cada mensaje consume la API
-de Anthropic.
+Además: la estimación se pinta en directo (eventos SSE `status`, `delta`,
+`done`, `error`); los turnos que han salido de la ventana se marcan en el chat
+(«el modelo ya no ve este turno, pero la memoria conserva sus hechos»); el
+panel enseña el system prompt exacto del próximo turno y las métricas de la
+última llamada; y si la sesión caduca (410) aparecen dos botones: **Empezar de
+cero** o **Continuar con la memoria heredada**. Cada turno consume la API de
+Anthropic.
 
 ## Sesión 5 · Memoria vs historial, y documentos adjuntos
 

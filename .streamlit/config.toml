@@ -1,0 +1,43 @@
+# Tema visual de la interfaz Streamlit (streamlit_app.py).
+#
+# Paleta cálida: fondo crema, tinta casi negra y un único acento dorado.
+# Tipografía: Palatino (serif) para el texto y los títulos; las etiquetas y
+# los textos pequeños van en Gill Sans (eso se hace por CSS, en la sección 1
+# de streamlit_app.py). Las dos son fuentes de sistema en Windows; si faltan,
+# se usan las alternativas de cada lista.
+#
+# Streamlit lee este fichero al arrancar: tras cambiarlo hay que reiniciar
+# Streamlit (Ctrl+C y volver a lanzar "uv run streamlit run streamlit_app.py").
+
+[theme]
+base = "light"
+backgroundColor = "#F7F3EC"           # crema: fondo de toda la página
+secondaryBackgroundColor = "#FDFAF4"  # hueso: cajas de texto, código
+textColor = "#1A1A18"                 # negro tinta
+# Dorado oscuro para botones, selectores y la barra de progreso. Es el tono
+# de la paleta que deja leer bien el texto blanco de los botones.
+primaryColor = "#8A6A3E"
+linkColor = "#8A6A3E"
+borderColor = "#D9CFC1"               # beige: bordes y separadores
+showWidgetBorder = true
+baseRadius = "0.3rem"
+
+font = "'Palatino Linotype', Palatino, 'Book Antiqua', 'TeX Gyre Pagella', Georgia, serif"
+headingFont = "'Palatino Linotype', Palatino, 'Book Antiqua', 'TeX Gyre Pagella', Georgia, serif"
+headingFontWeights = [400, 400, 400, 600, 600, 600]
+
+# Streamlit usa el "azul" en los avisos informativos (st.info) y en las
+# etiquetas de tecnologías (:blue-badge). Lo cambiamos por tonos dorados para
+# que no aparezca ningún azul en la página.
+blueColor = "#8A6A3E"
+blueBackgroundColor = "#EFE6D6"
+blueTextColor = "#5E4628"
+
+# Texto en formato código (ids de sesión, nombre del modelo...): por defecto
+# sale en verde; lo pasamos también a la gama dorada.
+codeTextColor = "#5E4628"
+codeBackgroundColor = "#EFE6D6"
+
+[theme.sidebar]
+backgroundColor = "#EBE3D4"           # beige claro: el panel lateral se distingue del fondo
+secondaryBackgroundColor = "#FDFAF4"

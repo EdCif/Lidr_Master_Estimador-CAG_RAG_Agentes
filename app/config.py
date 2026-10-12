@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     # Cuántas sesiones caben a la vez en memoria. Al superarlo se borra la que
     # lleva más tiempo sin usarse (LRU), para no llenar la RAM del proceso.
     max_sessions: int = Field(default=500, ge=1)
+    # Dirección de la API de sesiones a la que habla Streamlit (Paso 04). Por
+    # defecto, la que arranca "uvicorn app.main:app --port 8001" en local.
+    api_base_url: str = "http://127.0.0.1:8001"
     # Caducidad de las sesiones (TTL): segundos sin actividad tras los que una
     # sesión se archiva. El cliente puede entonces empezar otra de cero o
     # heredando su memoria. Mínimo 60 para no caducar en mitad de un turno.
