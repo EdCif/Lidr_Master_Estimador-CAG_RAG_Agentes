@@ -120,9 +120,19 @@ def read_transcript(
 
 
 async def read_attachments(
-    attachments: Annotated[list[UploadFile] | None, File(
+    # Lista de ficheros, vacía por defecto (y no "lista o None"): con el
+    # "o None", la página /docs no reconoce el campo como ficheros y manda su
+    # contenido como texto. El formato "binary" es la forma clásica de decirle
+    # a /docs que aquí va un selector de ficheros.
+    #
+    # Admitimos también texto (str) solo para un caso: /docs, con la casilla
+    # "Send empty value" marcada, manda "attachments=" vacío cuando no eliges
+    # ningún fichero. Eso significa "sin adjuntos" y lo ignoramos. Un texto
+    # NO vacío en lugar de un fichero se rechaza más abajo con un 422 claro.
+    attachments: Annotated[list[UploadFile | str], File(
         description="Documentación complementaria opcional: PDF o Word (.docx).",
-    )] = None,
+        json_schema_extra={"items": {"type": "string", "format": "binary"}},
+    )] = [],
     settings=Depends(get_settings),
 ) -> list[Attachment]:
     """Lee los ficheros adjuntos, comprueba cuántos son, su tamaño y su formato.
@@ -135,9 +145,19 @@ async def read_attachments(
     errores salen con su código HTTP y no dependemos de que el fichero
     temporal siga abierto mientras dura la respuesta.
     """
+    # Texto en lugar de fichero: vacío = "sin adjuntos" (lo manda /docs);
+    # con contenido = el cliente ha mandado el campo mal.
+    if any(isinstance(item, str) and item.strip() for item in attachments):
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "El campo attachments debe llevar ficheros (PDF o Word), no texto. "
+            "En /docs, pulsa 'Add string item' y elige el fichero con 'Choose File'.",
+        )
     # Algunos clientes mandan un "fichero" vacío y sin nombre cuando el
-    # usuario no elige ninguno. Lo descartamos.
-    files = [file for file in (attachments or []) if file.filename]
+    # usuario no elige ninguno. Lo descartamos igual.
+    # (Comprobamos "no es texto" y no "es UploadFile": los ficheros llegan
+    # como el UploadFile de Starlette, la librería sobre la que va FastAPI.)
+    files = [item for item in attachments if not isinstance(item, str) and item.filename]
     if len(files) > settings.max_attachments:
         raise HTTPException(
             status.HTTP_413_CONTENT_TOO_LARGE,

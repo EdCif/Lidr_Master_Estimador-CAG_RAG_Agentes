@@ -231,6 +231,26 @@ class EstimateEndpointTests(unittest.TestCase):
         )
         self.assertEqual(self.store.get(self.session_id).history.turn_count, 2)
 
+    def test_memory_is_filled_after_each_turn_and_kept_apart_from_history(self):
+        """Paso 01.3: tras el turno, la ficha se rellena con los hechos y se ve aparte."""
+        self.reply_chunks = [
+            "Estimación: 80 horas.\n",
+            "<hechos_del_proyecto>\nProyecto: Portal de reservas\nEquipo asumido: 3 personas\n"
+            "Tecnologías: React, FastAPI\nAlcance acordado: sin definir\n</hechos_del_proyecto>",
+        ]
+
+        events = parse_sse(self.estimate("Las tecnologías usadas son React y FastAPI.").text)
+
+        self.assertIn("Actualizando la memoria", " ".join(d.get("message", "") for n, d in events if n == "status"))
+        done = events[-1][1]
+        self.assertEqual(done["project_metadata"]["project_name"], "Portal de reservas")
+        self.assertEqual(done["project_metadata"]["assumed_team_size"], 3)
+        self.assertEqual(done["project_metadata"]["mentioned_technologies"], ["React", "FastAPI"])
+
+        state = self.client.get(f"/sessions/{self.session_id}").json()
+        self.assertEqual(state["project_metadata"]["project_name"], "Portal de reservas")
+        self.assertEqual(len(state["history"]), 2)  # el historial sigue siendo solo user + assistant
+
     def test_path_b_appends_attachment_text_with_separator(self):
         docx = make_docx("Especificación", ["Usaremos Kubernetes y PostgreSQL."])
         pdf = make_text_pdf("Diagrama: API Gateway y Kafka")
@@ -343,6 +363,26 @@ class EstimateEndpointTests(unittest.TestCase):
         for label, (call, expected_status) in cases.items():
             with self.subTest(label):
                 self.assertEqual(call().status_code, expected_status)
+        self.assertEqual(self.sent_messages, [])
+
+    def test_empty_attachments_field_sent_by_the_docs_page_means_no_attachments(self):
+        """/docs manda "attachments=" vacío si no eliges fichero: no es un error."""
+        response = self.client.post(
+            f"/sessions/{self.session_id}/estimate",
+            data={"transcript": "Sin adjuntos", "attachments": ""},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(parse_sse(response.text)[-1][0], "done")
+
+    def test_text_instead_of_a_file_is_rejected_with_a_clear_message(self):
+        response = self.client.post(
+            f"/sessions/{self.session_id}/estimate",
+            data={"transcript": "Hola", "attachments": "esto no es un fichero"},
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("Choose File", response.json()["detail"])
         self.assertEqual(self.sent_messages, [])
 
     def test_too_many_pdf_pages_or_inflated_docx_return_413_before_streaming(self):

@@ -34,6 +34,12 @@ app = FastAPI(
     debug=settings.debug,
     lifespan=lifespan,
 )
+# La página /docs (Swagger UI) no sabe pintar "lista de ficheros" cuando la
+# API se describe en OpenAPI 3.1: muestra cajas de texto y, con la casilla
+# "Send empty value" marcada, manda bytes inventados como si fueran texto
+# (error 422 en POST /sessions/{id}/estimate). Describiéndola en 3.0, /docs
+# muestra un selector de ficheros. Solo cambia la descripción, no la API.
+app.openapi_version = "3.0.3"
 install_error_handlers(app)
 app.include_router(estimations_router)
 app.include_router(ideas_router)

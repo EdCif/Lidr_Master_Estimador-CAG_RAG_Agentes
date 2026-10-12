@@ -9,6 +9,8 @@ En cada turno hace, en este orden:
    ventana + la pregunta nueva.
 3. Llama al LLM en streaming y va soltando cada trozo de texto según llega.
 4. Solo si la respuesta ha llegado completa, guarda el turno en el historial.
+5. Actualiza la memoria del proyecto (project_metadata) con los hechos del
+   turno, usando el extractor heurístico (``metadata_extractor.py``).
 
 Todo lo que pasa se comunica como una secuencia de eventos (``TurnEvent``)
 que el router convierte en Server-Sent Events:
@@ -39,6 +41,7 @@ from app.services.attachments.common import (
     PreparedContent,
     ReplyStats,
 )
+from app.services.metadata_extractor import update_metadata_from_turn
 from app.services.sessions import Session
 
 logger = logging.getLogger(__name__)
@@ -178,6 +181,17 @@ async def stream_estimation_turn(
     session.history.add_turn(prepared.user_content, stats.final_text)
     session.uploaded_files.extend(prepared.uploaded_files)
     session.touch()
+
+    # La memoria: leemos los hechos del turno (lo que ha dicho el cliente y
+    # el bloque <hechos_del_proyecto> de la respuesta) y los fundimos con la
+    # ficha que ya teníamos. En el siguiente turno, el system prompt los
+    # llevará en su bloque <project_metadata>. Si el extractor fallara por un
+    # error nuestro, no perdemos el turno: la ficha se queda como estaba.
+    yield _status("Actualizando la memoria del proyecto (project_metadata)...")
+    try:
+        session.metadata = update_metadata_from_turn(session.metadata, transcript, stats.final_text)
+    except Exception:
+        logger.exception("No se ha podido actualizar la memoria de la sesión %s", session.session_id)
 
     yield TurnEvent("done", {
         "estimation": stats.final_text,
