@@ -58,6 +58,8 @@ def fake_settings(**overrides):
         max_attachment_chars=300_000,
         max_pdf_pages=300,
         max_docx_uncompressed_mb=50,
+        max_turns=6,
+        max_sessions=500,
     )
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -114,6 +116,26 @@ class SessionsApiTests(unittest.TestCase):
                 {"role": "assistant", "content": "Anotado"},
             ],
         )
+
+    def test_store_takes_window_size_and_session_limit_from_settings(self):
+        """MAX_TURNS y MAX_SESSIONS del .env llegan al almacén real de la API.
+
+        get_session_store() guarda su resultado (lru_cache), así que vaciamos
+        esa caché antes y después para no contaminar otras pruebas.
+        """
+        settings = fake_settings(max_turns=3, max_sessions=7)
+        get_session_store.cache_clear()
+        self.addCleanup(get_session_store.cache_clear)
+        with patch("app.routers.sessions.get_settings", return_value=settings):
+            store = get_session_store()
+
+        self.assertEqual((store.max_turns, store.max_sessions), (3, 7))
+        session = store.create()
+        for number in range(1, 6):
+            session.history.add_turn(f"pregunta {number}", f"respuesta {number}")
+        # Con ventana 3: solo quedan los 3 últimos turnos; los 2 primeros se descartan.
+        self.assertEqual(session.history.turn_count, 3)
+        self.assertEqual(session.history.discarded_turns, 2)
 
     def test_session_id_in_uppercase_finds_the_same_session(self):
         session_id = self.client.post("/sessions").json()["session_id"]

@@ -62,6 +62,13 @@ class Settings(BaseSettings):
     # Techo de tokens de salida (el razonamiento interno también cuenta).
     # Solo se cobra lo que se genera, así que un techo alto no encarece nada.
     session_max_tokens: int = Field(default=64000, ge=1024)
+    # Ventana deslizante del historial: cuántos turnos (pregunta + respuesta)
+    # viajan como máximo en cada llamada al modelo, contando la pregunta nueva.
+    # Los más antiguos se descartan; la memoria (project_metadata) no.
+    max_turns: int = Field(default=6, ge=1)
+    # Cuántas sesiones caben a la vez en memoria. Al superarlo se borra la que
+    # lleva más tiempo sin usarse (LRU), para no llenar la RAM del proceso.
+    max_sessions: int = Field(default=500, ge=1)
     # Camino de adjuntos por defecto: "local" (B, extraemos el texto aquí) o
     # "files_api" (A, el PDF se sube a Anthropic y Claude lo lee entero).
     # Cada petición puede elegir otro con el campo attachment_mode.

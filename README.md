@@ -366,9 +366,13 @@ Markdown puede reflejar información del texto utilizado.
 | `ANTHROPIC_API_KEY` | Clave de Anthropic: Streamlit (sesión 2) y endpoints `/sessions` (sesión 5) |
 | `SESSION_LLM_MODEL` | Modelo de las sesiones; por defecto `claude-opus-5-5` |
 | `SESSION_LLM_EFFORT` | Esfuerzo de razonamiento de Opus 5.5: `low`, `medium` (defecto), `high`... |
+| `SESSION_MAX_TOKENS` | Techo de tokens de salida de cada respuesta, razonamiento incluido (64000) |
+| `MAX_TURNS` | Ventana del historial: turnos (pregunta + respuesta) que viajan en cada llamada, contando la pregunta nueva (6). La memoria `project_metadata` no se recorta |
+| `MAX_SESSIONS` | Sesiones a la vez en memoria; al pasarse se borra la menos usada (500) |
 | `ATTACHMENT_MODE` | Camino de adjuntos por defecto: `local` (B, defecto) o `files_api` (A) |
 | `PDF_EXTRACTOR` | Camino B: `pypdf` (defecto) o `markitdown` |
 | `MAX_ATTACHMENTS` / `MAX_ATTACHMENT_MB` | Límite de adjuntos por petición (5) y de tamaño por fichero (10 MB) |
+| `MAX_ATTACHMENT_CHARS` | Caracteres de texto que pueden sumar los adjuntos (300000); si se pasa, 413, nunca se recorta en silencio |
 | `MAX_PDF_PAGES` / `MAX_DOCX_UNCOMPRESSED_MB` | Topes que se miran antes de abrir el fichero: páginas de un PDF (300) y tamaño de un Word descomprimido (50 MB). Cortan PDF de miles de páginas y «bombas ZIP» con un 413 |
 
 El entorno tiene prioridad sobre `.env`, y este sobre los valores predeterminados

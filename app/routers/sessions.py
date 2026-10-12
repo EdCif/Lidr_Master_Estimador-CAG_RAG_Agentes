@@ -74,8 +74,17 @@ def get_session_store() -> SessionStore:
     Los endpoints lo reciben con Depends(get_session_store) en vez de
     importarlo directamente. Así, en los tests podemos sustituirlo por un
     almacén vacío con app.dependency_overrides y cada prueba empieza limpia.
+
+    El tamaño de la ventana (MAX_TURNS) y el tope de sesiones (MAX_SESSIONS)
+    se leen del .env. Como el almacén se crea una sola vez, un cambio en el
+    .env necesita reiniciar la API.
     """
-    return SessionStore(system_prompt_builder=provisional_prompt_builder)
+    settings = get_settings()
+    return SessionStore(
+        system_prompt_builder=provisional_prompt_builder,
+        max_turns=settings.max_turns,
+        max_sessions=settings.max_sessions,
+    )
 
 
 # ---------------------------------------------------------------------------

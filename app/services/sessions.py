@@ -27,7 +27,7 @@ un ``SessionStore``, que por dentro es un diccionario de Python indexado por
 
 Por qué en memoria del proceso y no en una base de datos
 --------------------------------------------------------
-Es una decisión pensada para esta fase del máster, no un descuido:
+Es relevante en este momento del curso para aprender aunque lo suyo es que fuera en una Base de Datos:
 
 * Lo que queremos aprender aquí es la diferencia entre historial y memoria.
   Un diccionario se entiende de un vistazo y no añade nada que distraiga.
@@ -61,13 +61,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Un turno es una pareja de mensajes: lo que pregunta el usuario y lo que
 # contesta el asistente. Con 6 turnos el modelo ve las últimas seis idas y
-# vueltas, que para ir afinando una estimación suele sobrar. En el Paso 5 lo
-# haremos configurable desde el .env.
+# vueltas, que para ir afinando una estimación suele sobrar. Es el valor por
+# defecto: la API lo toma de MAX_TURNS en el .env (ver app/config.py y
+# get_session_store() en app/routers/sessions.py).
 DEFAULT_MAX_TURNS = 6
 
 # Número máximo de sesiones vivas a la vez. Sin un tope, alguien que creara
 # sesiones en bucle iría llenando la RAM del proceso hasta tumbarlo. Cuando se
-# supera, se borra la sesión que lleva más tiempo sin usarse.
+# supera, se borra la sesión que lleva más tiempo sin usarse. También se puede
+# cambiar desde el .env (MAX_SESSIONS).
 DEFAULT_MAX_SESSIONS = 500
 
 # El contenido de un mensaje puede ser un texto o una lista de bloques
@@ -80,8 +82,8 @@ MessageContent = str | list[dict[str, Any]]
 Message = dict[str, Any]
 
 # Función que recibe la ficha del proyecto y devuelve el system prompt ya
-# montado. La define quien crea las sesiones (en el Paso 4 será la plantilla
-# Jinja2); este módulo no necesita saber cómo se escribe el prompt.
+# montado. La define quien crea las sesiones (en el Paso 01.2 será la
+# plantilla Jinja2); este módulo no necesita saber cómo se escribe el prompt.
 SystemPromptBuilder = Callable[["ProjectMetadata"], str]
 
 
@@ -98,13 +100,14 @@ class ProjectMetadata(BaseModel):
     alcance se ha pactado. Todo empieza vacío porque en el primer turno
     todavía no sabemos nada.
 
-    Quien la rellena es el extractor del Paso 4: después de cada respuesta,
-    una segunda llamada al LLM lee el turno y devuelve estos campos en JSON.
-    Por eso la validación es tolerante: ignora claves que no conoce, limpia
-    espacios, quita tecnologías repetidas y, si el tamaño de equipo no es un
-    número válido, lo deja como "no lo sabemos". Preferimos quedarnos con lo
-    aprovechable de un JSON imperfecto antes que perder el turno entero por un
-    detalle.
+    Quien la rellena es el extractor heurístico del Paso 01.3
+    (``app/services/metadata_extractor.py``): después de cada respuesta lee
+    el turno con reglas sencillas ("el proyecto se llama...", "equipo de N
+    personas"...) y devuelve estos campos. Por eso la validación es
+    tolerante: ignora claves que no conoce, limpia espacios, quita
+    tecnologías repetidas y, si el tamaño de equipo no es un número válido,
+    lo deja como "no lo sabemos". Preferimos quedarnos con lo aprovechable
+    antes que perder el turno entero por un detalle.
     """
 
     model_config = ConfigDict(
