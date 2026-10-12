@@ -99,7 +99,9 @@ async def stream_estimation_turn(
             async with path_a_files_api.make_client(api_key) as client:
                 if attachments:
                     yield _status("Subiendo los adjuntos a la Files API de Anthropic...")
-                prepared = await path_a_files_api.prepare_user_content(client, transcript, attachments)
+                prepared = await path_a_files_api.prepare_user_content(
+                    client, transcript, attachments, settings.max_attachment_chars
+                )
                 for note in prepared.notes:
                     yield _status(note)
                 messages = session.history.to_messages_list(pending_user_content=prepared.user_content)

@@ -42,6 +42,7 @@ from app.services.attachments.common import (
     LLMProviderError,
     PreparedContent,
     ReplyStats,
+    check_text_limit,
 )
 
 # Por debajo de esta media de caracteres por página, damos por hecho que
@@ -198,13 +199,7 @@ def prepare_user_content(
         documents.append((attachment.filename, text))
         notes.append(f"{attachment.filename}: {len(text):,} caracteres extraídos con {method}.".replace(",", "."))
 
-    total_chars = sum(len(text) for _, text in documents)
-    if total_chars > max_chars:
-        raise AttachmentError(
-            f"Los adjuntos suman {total_chars:,} caracteres de texto y el máximo es "
-            f"{max_chars:,}. Quita algún documento o envía solo las partes relevantes.".replace(",", "."),
-            status_code=413,
-        )
+    check_text_limit(sum(len(text) for _, text in documents), max_chars)
     return PreparedContent(
         user_content=build_prompt_with_attachments(transcript, documents),
         notes=notes,

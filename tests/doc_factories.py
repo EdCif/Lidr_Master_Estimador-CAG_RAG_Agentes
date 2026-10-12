@@ -44,10 +44,14 @@ def make_text_pdf(text: str) -> bytes:
     return bytes(out)
 
 
-def make_blank_pdf() -> bytes:
-    """PDF de una página en blanco: hace el papel de un PDF escaneado sin texto."""
+def make_blank_pdf(pages: int = 1) -> bytes:
+    """PDF de páginas en blanco: hace el papel de un PDF escaneado sin texto.
+
+    Con ``pages`` > 1 sirve también para probar el tope de páginas.
+    """
     writer = PdfWriter()
-    writer.add_blank_page(width=612, height=792)
+    for _ in range(pages):
+        writer.add_blank_page(width=612, height=792)
     buffer = io.BytesIO()
     writer.write(buffer)
     return buffer.getvalue()

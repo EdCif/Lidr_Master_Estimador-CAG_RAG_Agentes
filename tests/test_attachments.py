@@ -94,6 +94,55 @@ class CommonValidationTests(unittest.TestCase):
         self.assertEqual(attachment.kind, "pdf")
         self.assertEqual(attachment.media_type, "application/pdf")
 
+    # --- Topes que se miran antes de abrir el fichero (Paso 00-bis) ---------
+
+    def test_pdf_with_too_many_pages_is_rejected_before_extracting_text(self):
+        """Un PDF de 3 páginas con tope de 2 se corta con 413; con tope 3, pasa."""
+        three_pages = make_blank_pdf(pages=3)
+
+        with self.assertRaises(AttachmentError) as context:
+            validate_attachment("largo.pdf", three_pages, max_bytes=1_000_000, max_pdf_pages=2)
+        self.assertEqual(context.exception.status_code, 413)
+        self.assertIn("3 páginas", str(context.exception))
+
+        attachment = validate_attachment("largo.pdf", three_pages, max_bytes=1_000_000, max_pdf_pages=3)
+        self.assertEqual(attachment.kind, "pdf")
+
+    def test_docx_that_would_inflate_too_much_is_rejected_without_opening_it(self):
+        """Lo que mide es el Word DESCOMPRIMIDO, no los bytes que llegan.
+
+        El .docx de prueba ocupa unos pocos KB comprimido. Le ponemos un tope
+        de descomprimido justo por debajo de su tamaño real: tiene que
+        rechazarse aunque sus bytes estén muy por debajo de max_bytes.
+        """
+        import io
+        import zipfile
+
+        with zipfile.ZipFile(io.BytesIO(SPEC_DOCX)) as archive:
+            real_size = sum(info.file_size for info in archive.infolist())
+
+        with self.assertRaises(AttachmentError) as context:
+            validate_attachment(
+                "bomba.docx", SPEC_DOCX, max_bytes=10_000_000, max_docx_uncompressed_bytes=real_size - 1
+            )
+        self.assertEqual(context.exception.status_code, 413)
+
+        attachment = validate_attachment(
+            "normal.docx", SPEC_DOCX, max_bytes=10_000_000, max_docx_uncompressed_bytes=real_size
+        )
+        self.assertEqual(attachment.kind, "docx")
+
+    def test_broken_pdf_or_docx_is_rejected_with_422(self):
+        """Empiezan como un PDF o un ZIP de verdad, pero por dentro están rotos."""
+        cases = [
+            ("roto.pdf", b"%PDF-1.4\nesto no es un PDF de verdad"),
+            ("roto.docx", b"PK\x03\x04" + b"esto no es un zip de verdad" * 10),
+        ]
+        for filename, data in cases:
+            with self.subTest(filename=filename), self.assertRaises(AttachmentError) as context:
+                validate_attachment(filename, data, max_bytes=1_000_000)
+            self.assertEqual(context.exception.status_code, 422)
+
 
 # ---------------------------------------------------------------------------
 # Camino B · extracción local
@@ -330,6 +379,18 @@ class PathAPrepareTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Kubernetes", data.decode("utf-8"))
         self.assertEqual(prepared.user_content[0]["title"], "spec.docx")
         self.assertIn("no acepta .docx", prepared.notes[0])
+
+    async def test_docx_text_over_the_limit_is_rejected_before_uploading_anything(self):
+        """Mismo límite de caracteres que el Camino B, y sin subir nada a Anthropic."""
+        client, _ = fake_anthropic_client()
+
+        with self.assertRaises(AttachmentError) as context:
+            await path_a_files_api.prepare_user_content(
+                client, "Estima", [pdf_attachment(), docx_attachment()], max_chars=10
+            )
+
+        self.assertEqual(context.exception.status_code, 413)
+        self.assertEqual(client.files.uploads, [])
 
     async def test_connection_errors_become_a_readable_provider_error(self):
         client, _ = fake_anthropic_client()

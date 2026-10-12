@@ -22,6 +22,7 @@ ANTES de abrir el stream, así que si algo falla el cliente recibe un 404,
 (el proveedor cae, un PDF no tiene texto) llega como un evento ``error``.
 """
 
+import asyncio
 from collections.abc import AsyncIterable
 from functools import lru_cache
 from typing import Annotated
@@ -125,6 +126,10 @@ async def read_attachments(
 ) -> list[Attachment]:
     """Lee los ficheros adjuntos, comprueba cuántos son, su tamaño y su formato.
 
+    También mira lo que costaría abrirlos (páginas de un PDF, tamaño
+    descomprimido de un Word), para cortar ficheros trampa con un 413 antes
+    de empezar el turno.
+
     Leemos los bytes aquí, al principio, y no dentro del stream: así los
     errores salen con su código HTTP y no dependemos de que el fichero
     temporal siga abierto mientras dura la respuesta.
@@ -139,13 +144,24 @@ async def read_attachments(
         )
 
     max_bytes = int(settings.max_attachment_mb * 1_048_576)
+    max_docx_bytes = int(settings.max_docx_uncompressed_mb * 1_048_576)
     validated: list[Attachment] = []
     for file in files:
         # Leemos como mucho un byte más del límite: basta para saber si se
         # pasa, sin cargar en memoria un fichero de 2 GB que alguien suba por error.
         data = await file.read(max_bytes + 1)
         try:
-            validated.append(validate_attachment(file.filename, data, max_bytes))
+            # Contar las páginas de un PDF o leer el índice de un Word es
+            # rápido, pero es trabajo de CPU: va en otro hilo para no frenar
+            # al resto de peticiones mientras tanto.
+            validated.append(await asyncio.to_thread(
+                validate_attachment,
+                file.filename,
+                data,
+                max_bytes,
+                settings.max_pdf_pages,
+                max_docx_bytes,
+            ))
         except AttachmentError as error:
             raise HTTPException(error.status_code, str(error)) from None
     return validated

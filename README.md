@@ -369,6 +369,7 @@ Markdown puede reflejar información del texto utilizado.
 | `ATTACHMENT_MODE` | Camino de adjuntos por defecto: `local` (B, defecto) o `files_api` (A) |
 | `PDF_EXTRACTOR` | Camino B: `pypdf` (defecto) o `markitdown` |
 | `MAX_ATTACHMENTS` / `MAX_ATTACHMENT_MB` | Límite de adjuntos por petición (5) y de tamaño por fichero (10 MB) |
+| `MAX_PDF_PAGES` / `MAX_DOCX_UNCOMPRESSED_MB` | Topes que se miran antes de abrir el fichero: páginas de un PDF (300) y tamaño de un Word descomprimido (50 MB). Cortan PDF de miles de páginas y «bombas ZIP» con un 413 |
 
 El entorno tiene prioridad sobre `.env`, y este sobre los valores predeterminados
 de `config.py`. Reinicia la aplicación cuando cambies la configuración.

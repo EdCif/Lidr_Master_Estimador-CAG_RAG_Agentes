@@ -36,6 +36,7 @@ tener que subirlo otra vez.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -47,6 +48,7 @@ from app.services.attachments.common import (
     LLMProviderError,
     PreparedContent,
     ReplyStats,
+    check_text_limit,
 )
 from app.services.attachments.path_b_local import extract_docx_text
 
@@ -76,6 +78,7 @@ async def prepare_user_content(
     client: anthropic.AsyncAnthropic,
     transcript: str,
     attachments: list[Attachment],
+    max_chars: int = 300_000,
 ) -> PreparedContent:
     """Sube los adjuntos y monta el mensaje: bloques ``document`` + transcripción.
 
@@ -83,22 +86,45 @@ async def prepare_user_content(
     adjuntos, es una lista de bloques: primero los documentos y al final la
     transcripción. La documentación de Anthropic recomienda ese orden, con
     los documentos antes de la pregunta.
+
+    Va en dos pasadas:
+
+    1. Convertimos los Word a texto y comprobamos que, todos juntos, no
+       pasan de ``max_chars`` (el mismo límite que el Camino B). Si se
+       pasan, paramos aquí, sin haber subido nada a Anthropic.
+    2. Subimos los ficheros y montamos los bloques.
+
+    Los PDF no cuentan para ``max_chars`` porque no sacamos su texto: los
+    lee Anthropic. A ellos les ponen límite las páginas, que ya se
+    comprobaron al recibir la petición (common.validate_attachment).
     """
     if not attachments:
         return PreparedContent(user_content=transcript)
 
+    # Pasada 1. Extraer el texto de un Word es trabajo de CPU: con
+    # asyncio.to_thread lo hacemos en otro hilo, para que el servidor siga
+    # atendiendo otras peticiones mientras tanto (si no, un Word grande lo
+    # dejaría congelado unos segundos).
+    docx_texts: dict[int, str] = {}
+    for position, attachment in enumerate(attachments):
+        if attachment.kind == "docx":
+            text = await asyncio.to_thread(extract_docx_text, attachment.data, attachment.filename)
+            if not text:
+                raise AttachmentError(f"«{attachment.filename}» no tiene texto.")
+            docx_texts[position] = text
+    check_text_limit(sum(len(text) for text in docx_texts.values()), max_chars)
+
+    # Pasada 2. Subir y montar los bloques.
     blocks: list[dict[str, Any]] = []
     notes: list[str] = []
     uploaded: list[dict[str, str]] = []
     try:
-        for attachment in attachments:
+        for position, attachment in enumerate(attachments):
             if attachment.kind == "pdf":
                 file = (attachment.filename, attachment.data, attachment.media_type)
                 note = "subido a la Files API; Claude leerá el PDF completo, imágenes incluidas."
             else:
-                text = extract_docx_text(attachment.data, attachment.filename)
-                if not text:
-                    raise AttachmentError(f"«{attachment.filename}» no tiene texto.")
+                text = docx_texts[position]
                 file = (f"{attachment.filename}.txt", text.encode("utf-8"), "text/plain")
                 note = "la API no acepta .docx: convertido a texto en local y subido como .txt."
 

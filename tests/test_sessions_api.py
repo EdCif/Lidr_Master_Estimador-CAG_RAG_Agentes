@@ -56,6 +56,8 @@ def fake_settings(**overrides):
         max_attachments=5,
         max_attachment_mb=10,
         max_attachment_chars=300_000,
+        max_pdf_pages=300,
+        max_docx_uncompressed_mb=50,
     )
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -318,6 +320,26 @@ class EstimateEndpointTests(unittest.TestCase):
         for label, (call, expected_status) in cases.items():
             with self.subTest(label):
                 self.assertEqual(call().status_code, expected_status)
+        self.assertEqual(self.sent_messages, [])
+
+    def test_too_many_pdf_pages_or_inflated_docx_return_413_before_streaming(self):
+        """Los topes de páginas y de Word descomprimido salen como 413 de verdad.
+
+        Se comprueban en la dependencia, antes de abrir el stream, así que el
+        cliente recibe el código HTTP correcto y el LLM no llega a llamarse.
+        """
+        from doc_factories import make_blank_pdf
+
+        self.settings.max_pdf_pages = 2
+        self.settings.max_docx_uncompressed_mb = 0.001  # ~1 KB: cualquier Word real se pasa
+        cases = {
+            "PDF de 3 páginas": ("largo.pdf", make_blank_pdf(pages=3), "application/pdf"),
+            "Word inflado": ("grande.docx", make_docx("T", ["p"]), "application/octet-stream"),
+        }
+        for label, upload in cases.items():
+            with self.subTest(label):
+                response = self.estimate(files=[("attachments", upload)])
+                self.assertEqual(response.status_code, 413)
         self.assertEqual(self.sent_messages, [])
 
     def test_missing_anthropic_key_returns_503(self):

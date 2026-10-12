@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     max_attachments: int = Field(default=5, ge=0)
     max_attachment_mb: float = Field(default=10, gt=0)
     max_attachment_chars: int = Field(default=300_000, ge=1000)
+    # Topes que se miran ANTES de abrir el fichero (ver attachments/common.py):
+    # un PDF corto en megas puede tener miles de páginas, y un Word (que es un
+    # ZIP) de 10 MB puede ocupar gigas al descomprimirlo.
+    max_pdf_pages: int = Field(default=300, ge=1)
+    max_docx_uncompressed_mb: float = Field(default=50, gt=0)
 
     @field_validator("openai_api_key", "llm_model", mode="before")
     @classmethod
