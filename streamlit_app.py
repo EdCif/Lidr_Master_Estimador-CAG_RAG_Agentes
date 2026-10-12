@@ -114,6 +114,11 @@ st.markdown(
         [data-testid="stRadio"] label) *:not([data-testid="stIconMaterial"]) {
         font-family: "Gill Sans MT", "Gill Sans", "Trebuchet MS", "Segoe UI", Arial, sans-serif !important;
     }
+    /* El ID de la sesión, en el panel lateral, algo más grande y legible. */
+    [data-testid="stSidebar"] [data-testid="stCode"] code {
+        font-size: 0.95rem !important;
+        word-break: break-all;  /* si el panel es estrecho, salta de línea en vez de cortarse */
+    }
     /* Línea dorada fina bajo el título de la página, como acento. */
     [data-testid="stHeading"] h1 {
         border-bottom: 2px solid #C8A96E;
@@ -461,7 +466,17 @@ with previous_turns:
         turn = turns[index]
         outside_window = index < discarded
         is_latest = index == len(turns) - 1
-        with st.expander(turn_title(index + 1, turn, outside_window), expanded=is_latest and not generating):
+        title = turn_title(index + 1, turn, outside_window)
+        # El turno más reciente va en una tarjeta SIEMPRE abierta; los
+        # anteriores, en desplegables cerrados. (Si el último también fuera un
+        # desplegable, Streamlit recordaría que en esa posición había uno
+        # cerrado mientras se generaba, y aparecería cerrado al terminar.)
+        if is_latest and not generating:
+            box = st.container(border=True)
+            box.markdown(f"**{title}**")
+        else:
+            box = st.expander(title, expanded=False)
+        with box:
             if outside_window:
                 st.caption(
                     "🕳️ Fuera de la ventana: el modelo ya no ve este turno, "
@@ -544,10 +559,11 @@ if generating:
 with st.sidebar:
     st.header("Panel de la sesión")
     state = session_state or {}
-    st.caption(
-        f"Sesión `{st.session_state.session_id[:8]}…` · caduca a las "
-        f"{local_time(state.get('expires_at'))} si no hay actividad"
-    )
+    # El identificador completo, en su propia caja (con botón para copiarlo,
+    # útil para probar la sesión en /docs) y la caducidad en la línea de abajo.
+    st.markdown("**ID de la sesión**")
+    st.code(st.session_state.session_id, language=None, wrap_lines=True)
+    st.caption(f"⏳ Caduca a las {local_time(state.get('expires_at'))} si no hay actividad")
 
     # c.1) LA MEMORIA: la ficha con los hechos del proyecto. Viaja dentro del
     #      system prompt de cada turno y no se recorta con la ventana.
