@@ -4,6 +4,7 @@ Sin red ni claves: el cliente de Anthropic y litellm se sustituyen por
 dobles de prueba que graban lo que se les pide y devuelven respuestas fijas.
 """
 
+import io
 import os
 import unittest
 from types import SimpleNamespace
@@ -26,7 +27,7 @@ from app.services.attachments.common import (
     sanitize_filename,
     validate_attachment,
 )
-from doc_factories import make_blank_pdf, make_docx, make_text_pdf
+from doc_factories import make_blank_pdf, make_docx, make_pdf_with_orphan_pages, make_text_pdf
 
 
 # El Word de prueba se fabrica una sola vez, al cargar el módulo: python-docx
@@ -160,6 +161,46 @@ class PathBExtractionTests(unittest.TestCase):
 
         self.assertIn("Kubernetes", text)
         self.assertEqual(method, "MarkItDown")
+
+    # --- Los dos lectores de PDF ven el mismo documento (Paso 00-bis · 2) -----
+
+    def test_markitdown_never_sees_pages_that_pypdf_did_not_count(self):
+        """El PDF trucado esconde 3 páginas que solo encuentra pdfminer.
+
+        Sin la copia reescrita por pypdf, MarkItDown devolvía el texto de las
+        páginas ocultas. Ahora se rechaza: pypdf no ve ninguna página válida.
+        """
+        hidden = make_pdf_with_orphan_pages(["PAGINA OCULTA 1", "PAGINA OCULTA 2", "PAGINA OCULTA 3"])
+
+        with self.assertRaises(AttachmentError) as context:
+            path_b_local.extract_pdf_with_markitdown(hidden, "trucado.pdf")
+        self.assertEqual(context.exception.status_code, 422)
+
+    def test_markitdown_receives_the_copy_rewritten_by_pypdf(self):
+        """Lo que llega a MarkItDown es la copia de pypdf, con las mismas páginas."""
+        from markitdown import MarkItDown
+        from pypdf import PdfReader
+
+        # Un PDF escrito a mano (no por pypdf), para que la copia se note distinta.
+        original = make_text_pdf("Kubernetes")
+        received = []
+
+        def fake_convert_stream(self, stream, **kwargs):
+            received.append(stream.read())
+            return SimpleNamespace(markdown="texto")
+
+        with patch.object(MarkItDown, "convert_stream", fake_convert_stream):
+            path_b_local.extract_pdf_with_markitdown(original, "spec.pdf")
+
+        self.assertNotEqual(received[0], original)
+        self.assertIn(b"/Producer (pypdf)", received[0])
+        self.assertEqual(len(PdfReader(io.BytesIO(received[0])).pages), 1)
+
+    def test_pdf_whose_content_inflates_too_much_is_rejected(self):
+        """Tope del contenido descomprimido: con 10 bytes, cualquier página real se pasa."""
+        with self.assertRaises(AttachmentError) as context:
+            path_b_local.pdf_as_pypdf_sees_it(make_text_pdf("Kubernetes"), "grande.pdf", max_content_bytes=10)
+        self.assertEqual(context.exception.status_code, 413)
 
     def test_pdf_without_text_suggests_path_a(self):
         attachment = Attachment(filename="escaneado.pdf", kind="pdf", data=make_blank_pdf())

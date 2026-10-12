@@ -33,8 +33,8 @@ from typing import Any
 
 from docx import Document
 from docx.table import Table
-from pypdf import PdfReader
-from pypdf.errors import PdfReadError
+from pypdf import PdfReader, PdfWriter
+from pypdf.errors import LimitReachedError, PdfReadError
 
 from app.services.attachments.common import (
     Attachment,
@@ -49,6 +49,11 @@ from app.services.attachments.common import (
 # pypdf no ha sabido leer el PDF y probamos con MarkItDown. 20 caracteres es
 # menos que una línea: una página con texto real tiene cientos.
 _MIN_CHARS_PER_PAGE = 20
+
+# Tope del contenido de las páginas ya descomprimido (las instrucciones que
+# dibujan el texto). Un PDF de texto normal se queda en unos pocos MB; 50 MB
+# deja mucho margen y para los PDF "bomba" antes de que lleguen a MarkItDown.
+_MAX_PDF_CONTENT_BYTES = 50 * 1_048_576
 
 
 # ---------------------------------------------------------------------------
@@ -71,17 +76,95 @@ def extract_pdf_with_pypdf(data: bytes, filename: str = "documento.pdf") -> tupl
     return "\n\n".join(pages).strip(), len(pages)
 
 
+def pdf_as_pypdf_sees_it(
+    data: bytes,
+    filename: str = "documento.pdf",
+    max_content_bytes: int = _MAX_PDF_CONTENT_BYTES,
+) -> bytes:
+    """Reescribe el PDF con pypdf: solo las páginas que pypdf ha contado.
+
+    El problema que resuelve
+    ------------------------
+    Las páginas de un PDF las cuenta pypdf al validar el adjunto
+    (common.validate_attachment), pero MarkItDown lee el PDF con OTRO lector,
+    pdfminer. Un PDF trucado puede enseñar pocas páginas a uno y miles al
+    otro: por ejemplo, pdfminer tiene un "modo rescate" que, si el índice de
+    páginas está roto, busca páginas sueltas por todo el fichero. Así un
+    PDF pasaría el control con 2 páginas y luego costaría como 5.000.
+
+    La solución
+    -----------
+    MarkItDown nunca recibe el PDF original, sino esta copia, escrita por
+    pypdf página a página. Lo que no está en el índice de pypdf no llega a
+    la copia, así que los dos lectores ven exactamente el mismo documento y
+    el tope de páginas se cumple siempre.
+
+    De paso sumamos lo que ocupa el contenido de cada página descomprimido
+    (y el de los "formularios" que dibuja, un recurso que pdfminer también
+    lee). pypdf ya corta cualquier flujo que pase de 75 MB, pero pdfminer no
+    tiene ningún límite, así que ponemos uno para el total.
+    """
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        if reader.is_encrypted and not reader.decrypt(""):
+            raise AttachmentError(f"«{filename}» está protegido con contraseña.")
+        writer = PdfWriter()
+        total = 0
+        for page in reader.pages:
+            total += _page_content_size(page)
+            if total > max_content_bytes:
+                raise AttachmentError(
+                    f"«{filename}»: el contenido de sus páginas ocupa más de "
+                    f"{max_content_bytes / 1_048_576:.0f} MB al descomprimirlo.",
+                    status_code=413,
+                )
+            writer.add_page(page)
+        buffer = io.BytesIO()
+        writer.write(buffer)
+    except AttachmentError:
+        raise
+    except LimitReachedError as error:
+        # pypdf se ha negado a descomprimir algo por ser demasiado grande.
+        raise AttachmentError(
+            f"«{filename}» contiene partes que ocupan demasiado al descomprimirlas.",
+            status_code=413,
+        ) from error
+    except Exception as error:  # pypdf lanza errores variados con ficheros rotos
+        raise AttachmentError(f"«{filename}» no es un PDF válido o está dañado.") from error
+    return buffer.getvalue()
+
+
+def _page_content_size(page: Any) -> int:
+    """Bytes del contenido de una página, ya descomprimido, más sus formularios."""
+    size = 0
+    contents = page.get_contents()
+    if contents is not None:
+        size += len(contents.get_data())
+    resources = page.get("/Resources")
+    xobjects = resources.get_object().get("/XObject") if resources is not None else None
+    if xobjects is not None:
+        for reference in xobjects.get_object().values():
+            xobject = reference.get_object()
+            if xobject.get("/Subtype") == "/Form":
+                size += len(xobject.get_data())
+    return size
+
+
 def extract_pdf_with_markitdown(data: bytes, filename: str = "documento.pdf") -> str:
     """Convierte un PDF a Markdown con MarkItDown.
 
     Lo importamos aquí dentro y no arriba del todo porque MarkItDown carga
     bastantes dependencias. Así solo pagamos ese tiempo cuando se usa.
+
+    Ojo: a MarkItDown le pasamos la copia de ``pdf_as_pypdf_sees_it``, nunca
+    el PDF tal como ha llegado (ver el porqué en esa función).
     """
     from markitdown import MarkItDown
 
+    safe_copy = pdf_as_pypdf_sees_it(data, filename)
     try:
         result = MarkItDown(enable_plugins=False).convert_stream(
-            io.BytesIO(data), file_extension=".pdf"
+            io.BytesIO(safe_copy), file_extension=".pdf"
         )
     except Exception as error:  # MarkItDown no tiene una excepción propia estable
         raise AttachmentError(f"MarkItDown no ha podido leer «{filename}».") from error
@@ -249,7 +332,7 @@ async def stream_reply(
     "anthropic/" del modelo le dice con qué proveedor hablar.
 
     El esfuerzo de razonamiento no se lo pasamos: litellm no tiene un
-    parámetro común para eso, y el valor por defecto de Opus 5.5 ya es
+    parámetro común para eso, y el valor por defecto del modelo del LLM ya es
     "medium", el mismo que fijamos en el Camino A. Así los dos caminos
     estiman en igualdad de condiciones.
     """
@@ -294,7 +377,7 @@ async def stream_reply(
         raise LLMProviderError("El proveedor del LLM ha devuelto un error. Reintenta en unos momentos.") from error
 
     stats.final_text = "".join(chunks)
-    # litellm traduce los motivos de parada al vocabulario de OpenAI:
+    # litellm traduce los motivos de parada al vocabulario de OpenAI / Anthropic:
     # "stop" = terminó bien, "length" = se quedó sin tokens, "content_filter"
     # = el modelo se negó a responder.
     if finish_reason == "length":

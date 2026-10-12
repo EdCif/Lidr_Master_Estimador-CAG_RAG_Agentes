@@ -57,7 +57,7 @@ from app.services.attachments.path_b_local import extract_docx_text
 # sobran. La API admite entre 1 hora (3600) y 90 días.
 FILES_EXPIRE_SECONDS = 24 * 60 * 60
 
-# Si los filtros de seguridad de Opus 5.5 rechazan una petición, con
+# Si los filtros de seguridad del modelo LLM rechazan una petición, con
 # fallbacks="default" la API la repite automáticamente con el modelo que
 # Anthropic recomienda para ese caso, en la misma llamada. Es una función en
 # beta, por eso va con su cabecera.
@@ -97,6 +97,11 @@ async def prepare_user_content(
     Los PDF no cuentan para ``max_chars`` porque no sacamos su texto: los
     lee Anthropic. A ellos les ponen límite las páginas, que ya se
     comprobaron al recibir la petición (common.validate_attachment).
+
+    A diferencia del Camino B, aquí subimos el PDF tal cual, sin reescribirlo
+    con pypdf (path_b_local.pdf_as_pypdf_sees_it). Quien lo abre es
+    Anthropic, en sus servidores y con sus propios límites (600 páginas,
+    32 MB), así que un PDF trucado no puede costarle nada a nuestro servidor.
     """
     if not attachments:
         return PreparedContent(user_content=transcript)
