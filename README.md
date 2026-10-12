@@ -127,10 +127,73 @@ diccionario de Python, sin base de datos). Si reinicias la API, las sesiones
 se pierden: es una limitación aceptada en esta fase y explicada en
 [app/services/sessions.py](app/services/sessions.py).
 
+### Cómo se construye y se actualiza la memoria (`project_metadata`)
+
+En cada turno la memoria hace un viaje de ida y vuelta:
+
+```text
+ ficha (ProjectMetadata) ──► plantilla Jinja2 ──► system prompt ─┐
+                                                                 ├──► Claude ──► respuesta
+ historial (últimos turnos) + pregunta nueva ────────────────────┘                  │
+        ▲                                                                           │
+        └──────── extractor heurístico (lee el turno y actualiza la ficha) ◄────────┘
+```
+
+**Ida: la ficha entra en el system prompt.** El prompt de las sesiones es una
+plantilla Jinja2 versionada,
+[app/prompts/estimator_system_v1.j2](app/prompts/estimator_system_v1.j2), que
+rellena [prompt_builder.py](app/services/prompt_builder.py). Lleva las mismas
+reglas y ejemplos CAG de la sesión 1 y un bloque `<project_metadata>` con los
+hechos conocidos, una línea por dato. En el primer turno el bloque va vacío.
+El historial no guarda el system prompt: lo genera de nuevo en cada llamada
+con la ficha de ese momento, así que siempre va el primero y siempre está al
+día. Cada dato pasa por el filtro `as_fact` (una sola línea, sin `<` ni `>`,
+200 caracteres como máximo), para que lo que escribe el cliente no pueda
+salirse del bloque ni colar instrucciones.
+
+**Vuelta: la ficha se actualiza sola tras cada respuesta.** Lo hace
+[metadata_extractor.py](app/services/metadata_extractor.py) con **heurísticas**
+(reglas y expresiones regulares en español), sin una segunda llamada al
+modelo. Por eso es gratis, instantáneo y siempre da el mismo resultado. Lee
+dos fuentes:
+
+1. El bloque `<hechos_del_proyecto>` con el que la plantilla pide al modelo
+   que cierre cada respuesta (`Proyecto: …`, `Equipo asumido: …`,
+   `Tecnologías: …`, `Alcance acordado: …`). Al tener un formato fijo,
+   leerlo con reglas es fiable, y el modelo ya ha tenido en cuenta la
+   transcripción, los adjuntos y los turnos anteriores.
+2. Frases típicas del cliente en su mensaje: «el proyecto se llama…», «un
+   equipo de tres personas», «las tecnologías son…», «hemos acordado que…»,
+   y tecnologías conocidas por su nombre (React, PostgreSQL, Kubernetes…).
+
+Al fundirlo con lo que ya sabíamos, un dato nuevo sustituye al anterior, las
+tecnologías se suman y ningún hecho se borra por no repetirse. Si el cliente
+dice algo explícito en ese turno («ahora seremos 4»), gana sobre el bloque
+del modelo, porque es la decisión más reciente. La ficha tiene topes (200
+caracteres por dato, 30 tecnologías, equipo de 1 a 1000 personas), porque
+viaja en cada system prompt y no puede crecer sin control.
+
+### Ventana deslizante y caducidad de las sesiones
+
+- **Ventana:** en cada llamada viajan como mucho `MAX_TURNS` turnos (6 por
+  defecto). Un turno es la pareja pregunta + respuesta, y la pregunta nueva
+  cuenta como uno de ellos: con 6, viajan los 5 anteriores más la nueva. Los
+  más antiguos se descartan de dos en dos, sin partir nunca un turno.
+- **Caducidad (TTL):** una sesión sin actividad durante
+  `SESSION_TTL_SECONDS` (1 hora) se archiva: se guarda solo su ficha y el
+  historial se descarta. Si el cliente vuelve, recibe un `410` con esa ficha
+  y dos opciones: sesión nueva de cero (`POST /sessions`) o heredando la
+  memoria (`POST /sessions` con `{"inherit_from": "<id>"}`). La comprobación
+  se hace al pedir o crear sesiones, sin ningún proceso de fondo.
+- **Tope de sesiones:** como mucho `MAX_SESSIONS` vivas (500). Al pasarse se
+  borra la que lleva más tiempo sin usarse.
+
 ### Probarlo
 
-Necesitas `ANTHROPIC_API_KEY` en tu `.env` (las dos rutas usan Claude Opus
-5.5). Arranca la API como siempre:
+Lo más cómodo es la [interfaz Streamlit](#interfaz-streamlit-sesión-5-cliente-de-la-api-de-sesiones):
+el panel lateral enseña la memoria y el historial por separado, turno a turno.
+Para probar la API directamente necesitas `ANTHROPIC_API_KEY` en tu `.env`
+(las dos rutas usan Claude Opus 5.5). Arranca la API como siempre:
 
 ```powershell
 uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
@@ -169,9 +232,10 @@ generado con el soporte nativo de FastAPI (`fastapi.sse.EventSourceResponse`):
 | `done` | Fin del turno: estimación completa, tokens y estado de la sesión |
 | `error` | Algo ha fallado durante el turno; no se guarda y el cliente descarta el texto parcial |
 
-Lo que se puede comprobar antes de empezar a generar (sesión inexistente,
-transcripción vacía, adjunto que no es PDF ni Word, demasiado grande o
-demasiados) se responde con su código HTTP: `404`, `422`, `415` o `413`.
+Lo que se puede comprobar antes de empezar a generar (sesión inexistente o
+caducada, transcripción vacía, adjunto que no es PDF ni Word, demasiado grande
+o demasiados) se responde con su código HTTP: `404`, `410`, `422`, `415` o
+`413`.
 
 ### Adjuntos: dos caminos
 
@@ -204,6 +268,12 @@ plano como documento, así que su texto se extrae en local y se sube como
 3. El mensaje es texto plano y se envía con **litellm**, que funciona igual
    con cualquier proveedor.
 
+La extracción se hace en **un proceso Python aparte con tiempo máximo**
+(`ATTACHMENT_EXTRACTION_TIMEOUT_S`, 30 s),
+[extraction_worker.py](app/services/attachments/extraction_worker.py): si un
+documento trucado deja colgado al lector, se cancela ese proceso y la API
+sigue funcionando.
+
 | | Camino A · Files API | Camino B · extracción local |
 | --- | --- | --- |
 | Código propio | Poco: subir y referenciar | Más: extraer, limpiar, concatenar |
@@ -225,6 +295,21 @@ cómo llegan los documentos. En el Camino A está activado el *fallback*
 automático de Anthropic: si los filtros de seguridad rechazan una petición,
 la API la repite con el modelo que recomienda para ese caso.
 
+**Límites de seguridad de los adjuntos.** Un fichero pequeño puede costar
+mucho al abrirlo, así que, además del tamaño (`MAX_ATTACHMENT_MB`), se
+comprueba antes de extraer nada:
+
+| Riesgo | Defensa |
+| --- | --- |
+| Un `.docx` es un ZIP: 10 MB pueden ocupar gigas al descomprimirlo | Se suma el tamaño descomprimido leyendo el índice del ZIP, sin descomprimir (`MAX_DOCX_UNCOMPRESSED_MB`) |
+| Un PDF pequeño con miles de páginas | Se cuentan las páginas antes de extraer (`MAX_PDF_PAGES`) |
+| Un PDF trucado que enseña páginas distintas a cada lector | MarkItDown solo recibe una copia del PDF reescrita por pypdf |
+| Un PDF que pasa todos los topes y aun así cuelga al lector | Proceso aparte con tiempo máximo (Camino B) |
+| Demasiado texto en total | `413` si se supera `MAX_ATTACHMENT_CHARS`; nunca se recorta en silencio |
+
+En el Camino A el PDF lo abre Anthropic en sus servidores, con sus propios
+límites; los `.docx` se convierten a texto en local con los mismos topes.
+
 ## Arquitectura y capa de responsabilidades
 
 ```text
@@ -239,16 +324,21 @@ estimador-cag/
 │   │   ├── estimations.py       # POST /api/v1/estimate
 │   │   ├── ideas.py             # Ideas, estados e historial
 │   │   └── sessions.py          # Sesión 5: /sessions y /sessions/{id}/estimate (SSE)
+│   ├── prompts/
+│   │   └── estimator_system_v1.j2   # Sesión 5: plantilla Jinja2 del system prompt (<project_metadata>)
 │   ├── services/
 │   │   ├── __init__.py
 │   │   ├── llm_service.py       # Construcción del prompt y llamada al LLM
 │   │   ├── idea_service.py      # Persistencia de ideas en SQLite
-│   │   ├── sessions.py          # Sesión 5: historial con ventana, memoria y almacén
-│   │   ├── conversation_service.py  # Sesión 5: un turno completo, de los adjuntos al historial
+│   │   ├── sessions.py          # Sesión 5: historial con ventana, memoria, TTL y almacén
+│   │   ├── prompt_builder.py    # Sesión 5: rellena la plantilla con la memoria
+│   │   ├── metadata_extractor.py    # Sesión 5: extractor heurístico de project_metadata
+│   │   ├── conversation_service.py  # Sesión 5: un turno completo, de los adjuntos a la memoria
 │   │   └── attachments/
-│   │       ├── common.py            # Validación de PDF y Word
+│   │       ├── common.py            # Validación y límites de PDF y Word
 │   │       ├── path_a_files_api.py  # Camino A: Files API de Anthropic
-│   │       └── path_b_local.py      # Camino B: pypdf / MarkItDown / python-docx + litellm
+│   │       ├── path_b_local.py      # Camino B: pypdf / MarkItDown / python-docx + litellm
+│   │       └── extraction_worker.py # Camino B: extracción en un proceso aparte con tiempo máximo
 │   ├── schemas/
 │   │   ├── __init__.py
 │   │   ├── estimation.py        # Contratos de petición y respuesta
@@ -261,9 +351,13 @@ estimador-cag/
 │       ├── index.html           # Interfaz de usuario
 │       ├── app.js              # Formularios y comunicación con la API
 │       └── styles.css          # Diseño adaptable a móvil y escritorio
-├── docs/transcripcion_reunion.md
+├── docs/
+│   ├── transcripcion_reunion.md
+│   └── ejemplos/                # Sesión 5: PDF y Word ficticios para probar los adjuntos
 ├── scripts/validate_pipeline.py
 ├── tests/
+├── streamlit_app.py             # Interfaz Streamlit (sesión 5: cliente de la API de sesiones)
+├── .streamlit/config.toml       # Tema de la interfaz Streamlit (colores y letra)
 ├── .github/workflows/validate.yml
 ├── .env.example
 ├── .gitignore
@@ -293,9 +387,9 @@ Los ejemplos permanecen en el repositorio y se añaden a cada petición.
 | `GET /api/v1/ideas/{id}` | Consultar una idea y sus versiones |
 | `PATCH /api/v1/ideas/{id}` | Actualizar título, descripción, texto, notas o estado |
 | `POST /api/v1/ideas/{id}/estimate` | Generar y guardar una nueva versión |
-| `POST /sessions` | Sesión 5: crear una conversación vacía; devuelve `{"session_id": "..."}` |
-| `GET /sessions/{id}` | Sesión 5: ver la memoria (`project_metadata`) y el historial de la sesión |
-| `POST /sessions/{id}/estimate` | Sesión 5: estimar con transcripción y adjuntos (multipart); respuesta en streaming SSE |
+| `POST /sessions` | Sesión 5: crear una conversación; devuelve `session_id`. Con `{"inherit_from": "<id>"}` hereda la memoria de otra sesión |
+| `GET /sessions/{id}` | Sesión 5: ver la memoria (`project_metadata`), el historial y cuándo caduca (`expires_at`). `410` si ha caducado |
+| `POST /sessions/{id}/estimate` | Sesión 5: estimar con transcripción y adjuntos (multipart); respuesta en streaming SSE. `410` si ha caducado |
 
 Petición mínima para el endpoint original:
 
