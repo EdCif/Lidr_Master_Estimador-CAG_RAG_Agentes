@@ -67,6 +67,9 @@ REQUIRED_FILES = (
     "tests/test_metadata_extractor.py",
     "tests/test_attachments.py",
     "tests/doc_factories.py",
+    "tests/api_helpers.py",
+    "tests/conftest.py",
+    "tests/test_integration_sessions.py",
     "docs/transcripcion_reunion.md",
     "README.md",
     ".env.example",
@@ -146,8 +149,10 @@ def run_tests() -> dict:
     # Otro proceso aísla los parches de tests de la prueba completa de la API.
     with tempfile.TemporaryDirectory(prefix="estimador-tests-") as data_dir:
         environment = {**os.environ, **OFFLINE_ENV, "DATA_DIR": data_dir}
+        # pytest ejecuta tanto los tests de unittest como los de integración
+        # de la sesión 5 (pytest + httpx.AsyncClient), que unittest no ve.
         result = subprocess.run(
-            [sys.executable, "-B", "-m", "unittest", "discover", "-s", "tests", "-v"],
+            [sys.executable, "-B", "-m", "pytest", "tests", "-v", "-p", "no:cacheprovider"],
             cwd=PROJECT_ROOT,
             env=environment,
             capture_output=True,
@@ -160,7 +165,7 @@ def run_tests() -> dict:
     # Las pruebas usan datos ficticios; la salida ayuda a localizar una regresión.
     output = result.stdout + result.stderr
     print(output.rstrip())
-    match = re.search(r"Ran (\d+) tests?", output)
+    match = re.search(r"(\d+) passed", output)
     count = int(match.group(1)) if match else 0
     require(count > 0, "La ejecución no ha confirmado ninguna prueba.")
     require(result.returncode == 0, "La suite de pruebas ha fallado; revisa su salida.")

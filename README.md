@@ -414,6 +414,34 @@ esa idea; `502`, un fallo o respuesta incompleta del proveedor; `503`, un límit
 de servicio; `504`, tiempo de espera agotado. El resultado no se guarda como una
 estimación correcta si el modelo devuelve una respuesta incompleta.
 
+## Tests
+
+Desde la carpeta `estimador-cag`:
+
+```powershell
+uv run python -m pytest tests -v                                     # todos
+uv run python -m pytest tests/test_integration_sessions.py -v        # los de integración de la sesión 5
+```
+
+Ninguno necesita claves ni red: el modelo se sustituye por un doble de prueba.
+
+Los **tests de integración** de la sesión 5
+([tests/test_integration_sessions.py](tests/test_integration_sessions.py)) usan
+**pytest** y **`httpx.AsyncClient`** contra la API en memoria
+(`httpx.ASGITransport`). Recorren la API completa (formulario multipart,
+validaciones, extracción real del PDF, plantilla Jinja2, extractor de memoria,
+ventana del historial) y solo el modelo es falso (`FakeLLM`, en
+[tests/conftest.py](tests/conftest.py)). Son los tres que pide el ejercicio:
+
+| Test | Qué comprueba |
+| --- | --- |
+| `test_two_requests_in_the_same_session_update_the_project_metadata` | Dos peticiones en la misma sesión: la memoria se rellena en la primera, se actualiza en la segunda sin perder lo anterior y viaja en el system prompt de la segunda llamada |
+| `test_an_attached_pdf_changes_the_estimation` | La misma transcripción, sin y con un PDF: el texto del PDF llega al modelo y cambia la estimación y la memoria |
+| `test_eight_turns_never_send_more_than_max_turns` | Ocho turnos: en ninguna llamada viajan más de `MAX_TURNS` turnos; al final, 6 en la ventana y 2 descartados, y el hecho del turno 1 sigue en la memoria |
+
+El resto (unitarios de sesiones, plantilla, extractor, adjuntos y endpoints)
+están escritos con `unittest`; pytest los ejecuta igual.
+
 ## Pipeline automático de validación
 
 ### Sin credenciales ni consumo de API
@@ -426,7 +454,8 @@ El pipeline realiza cuatro comprobaciones y termina con código `0` solo si pasa
 
 1. Verifica los archivos esperados y analiza la sintaxis de los módulos Python.
 2. Carga la transcripción del ejercicio y comprueba que tenga contenido.
-3. Ejecuta todas las pruebas con `unittest` y rechaza una suite vacía.
+3. Ejecuta todas las pruebas con `pytest` (las de `unittest` y las de
+   integración de la sesión 5) y rechaza una suite vacía.
 4. Inicia la aplicación con un directorio de datos temporal y llama a la API con
    `TestClient`: verifica la web, sus recursos, `/health`, el rechazo de texto
    vacío y el recorrido completo de una petición válida por el servicio y el SDK.

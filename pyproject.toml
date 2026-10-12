@@ -20,3 +20,17 @@ dependencies = [
     "streamlit>=1.64.0",
     "uvicorn>=0.30,<1",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
+
+# pytest (Paso 03): busca los tests en tests/, deja importar el paquete "app"
+# desde la raíz y ejecuta los tests "async def" sin decorarlos uno a uno.
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
