@@ -105,6 +105,27 @@ Anthropic.
 
 ## Sesión 5 · Memoria vs historial, y documentos adjuntos
 
+### Resumen de la entrega
+
+| | |
+| --- | --- |
+| **Cómo se levanta** | Desde `estimador-cag`, con `ANTHROPIC_API_KEY` en el `.env`: `uv sync --locked`, después `uv run uvicorn app.main:app --host 127.0.0.1 --port 8001` (la API) y, en otra terminal, `uv run streamlit run streamlit_app.py` (la interfaz, en http://localhost:8501). Detalle en [Interfaz Streamlit](#interfaz-streamlit-sesión-5-cliente-de-la-api-de-sesiones). |
+| **Cómo se ejecutan los tests** | `uv run python -m pytest tests -v` (139 tests, sin claves ni red). Los tres de integración que pide el ejercicio: `uv run python -m pytest tests/test_integration_sessions.py -v`. Detalle en [Tests](#tests). |
+| **Camino de adjuntos elegido** | Están los dos y se elige en cada petición. Por defecto, el **Camino B (extracción local** con pypdf / MarkItDown / python-docx, texto tras `--- attachment: nombre ---`): vemos qué texto recibe el modelo, no dependemos del proveedor y es la base del RAG del módulo 3. El Camino A (Files API de Anthropic) queda para PDF escaneados o con diagramas. Detalle en [Adjuntos: dos caminos](#adjuntos-dos-caminos). |
+| **Cómo se extrae `project_metadata`** | Con **heurísticas** (reglas y expresiones regulares), sin una segunda llamada al modelo: tras cada respuesta se lee el bloque `<hechos_del_proyecto>` con el que la plantilla Jinja2 pide al modelo cerrar, y las frases explícitas del cliente («el proyecto se llama…», «equipo de N personas»…). Se funde con la ficha anterior y vuelve al system prompt en el bloque `<project_metadata>`. Detalle en [Cómo se construye y se actualiza la memoria](#cómo-se-construye-y-se-actualiza-la-memoria-project_metadata). |
+
+**Diferencias con el punto de partida que supone el enunciado.** Nuestro
+proyecto viene de las sesiones 1 y 2, así que hay piezas del punto de partida
+que no tiene y que esta sesión no añade, porque no forman parte de sus
+objetivos: un *wrapper* común de proveedores (la sesión 1 llama a OpenAI y la
+sesión 5 a Anthropic, cada una con su cliente), caché de respuestas,
+observabilidad con `structlog`, parámetros de entrada tipados en un
+formulario, salida estructurada validada con Pydantic (la estimación es
+Markdown) y *guardrails* sobre la salida (solo se detectan respuestas cortadas
+o rechazadas). Sí están las plantillas Jinja2 versionadas (ahora para el
+system prompt de las sesiones). Para el modelo usamos **Claude Opus 5.5** en
+los dos caminos, en lugar de Sonnet 5.5.
+
 Hasta ahora cada estimación era una petición suelta. Desde la sesión 5 el
 estimador mantiene **conversaciones**: el cliente puede ir afinando la
 estimación en varios turnos y adjuntar PDF o Word con especificaciones,
