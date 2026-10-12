@@ -114,6 +114,18 @@ Anthropic.
 | **Camino de adjuntos elegido** | Están los dos y se elige en cada petición. Por defecto, el **Camino B (extracción local** con pypdf / MarkItDown / python-docx, texto tras `--- attachment: nombre ---`): vemos qué texto recibe el modelo, no dependemos del proveedor y es la base del RAG del módulo 3. El Camino A (Files API de Anthropic) queda para PDF escaneados o con diagramas. Detalle en [Adjuntos: dos caminos](#adjuntos-dos-caminos). |
 | **Cómo se extrae `project_metadata`** | Con **heurísticas** (reglas y expresiones regulares), sin una segunda llamada al modelo: tras cada respuesta se lee el bloque `<hechos_del_proyecto>` con el que la plantilla Jinja2 pide al modelo cerrar, y las frases explícitas del cliente («el proyecto se llama…», «equipo de N personas»…). Se funde con la ficha anterior y vuelve al system prompt en el bloque `<project_metadata>`. Detalle en [Cómo se construye y se actualiza la memoria](#cómo-se-construye-y-se-actualiza-la-memoria-project_metadata). |
 
+**Capturas de la interfaz** (en [docs/capturas/](docs/capturas/)). Una
+conversación de tres turnos: el turno 1 presenta el proyecto, el 2 adjunta
+[especificacion_tecnica.pdf](docs/ejemplos/especificacion_tecnica.pdf) y el 3
+cambia el equipo a 4 personas y acuerda el alcance. En el panel lateral se ve
+la memoria (`project_metadata`) separada del historial (3 de 6 turnos en la
+ventana); 🆕 marca lo que cambió en el último turno.
+
+![Streamlit tras tres turnos: memoria y historial en el panel lateral](docs/capturas/01_sesion05_streamlit.png)
+
+- [Pantalla inicial, con la sesión recién creada y la memoria vacía](docs/capturas/00_Main_sesion05_streamlit.png)
+- [Página completa del turno 3, con la estimación entera](docs/capturas/02_sesion05_streamlit.png)
+
 **Diferencias con el punto de partida que supone el enunciado.** Nuestro
 proyecto viene de las sesiones 1 y 2, así que hay piezas del punto de partida
 que no tiene y que esta sesión no añade, porque no forman parte de sus
