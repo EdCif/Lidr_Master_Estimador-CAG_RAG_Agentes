@@ -17,7 +17,7 @@ os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 import anthropic
 import httpx2
 
-from app.services.attachments import path_a_files_api, path_b_local
+from app.services.attachments import extraction_worker, path_a_files_api, path_b_local
 from app.services.attachments.common import (
     Attachment,
     AttachmentError,
@@ -283,6 +283,71 @@ def litellm_chunk(text=None, finish_reason=None, usage=None):
 async def async_iter(items):
     for item in items:
         yield item
+
+
+class ExtractionTimeLimitTests(unittest.TestCase):
+    """Camino B · la extracción en un proceso aparte con tiempo máximo.
+
+    Estos tests arrancan de verdad otro Python, así que tardan algo más
+    (alrededor de un segundo cada uno).
+    """
+
+    def test_text_is_extracted_in_a_separate_process_with_the_same_result(self):
+        """El resultado es idéntico al de extraer en la propia API."""
+        attachments = [pdf_attachment(), docx_attachment()]
+
+        in_child = extraction_worker.prepare_user_content_with_time_limit(
+            "Transcripción", attachments, "pypdf", 300_000, timeout_s=60
+        )
+        in_api = path_b_local.prepare_user_content("Transcripción", attachments, "pypdf", 300_000)
+
+        self.assertEqual(in_child.user_content, in_api.user_content)
+        self.assertEqual(in_child.notes, in_api.notes)
+        self.assertIn("--- attachment: arquitectura.pdf ---", in_child.user_content)
+
+    def test_errors_in_the_child_keep_their_message_and_http_code(self):
+        """Un error previsto dentro del hijo llega a la API igual que si fuera local."""
+        cases = [
+            # PDF sin texto: 422 con la pista de usar el Camino A.
+            ([Attachment(filename="escaneado.pdf", kind="pdf", data=make_blank_pdf())], 300_000, 422, "files_api"),
+            # Demasiado texto: 413.
+            ([docx_attachment()], 10, 413, "caracteres"),
+        ]
+        for attachments, max_chars, status_code, text in cases:
+            with self.subTest(status_code=status_code), self.assertRaises(AttachmentError) as context:
+                extraction_worker.prepare_user_content_with_time_limit(
+                    "T", attachments, "pypdf", max_chars, timeout_s=60
+                )
+            self.assertEqual(context.exception.status_code, status_code)
+            self.assertIn(text, str(context.exception))
+
+    def test_an_extraction_that_takes_too_long_is_cancelled_with_413(self):
+        """Con un límite de 1 milésima, el hijo no llega ni a arrancar: se cancela."""
+        with self.assertRaises(AttachmentError) as context:
+            extraction_worker.prepare_user_content_with_time_limit(
+                "T", [pdf_attachment()], "pypdf", 300_000, timeout_s=0.001
+            )
+        self.assertEqual(context.exception.status_code, 413)
+        self.assertIn("se ha cancelado", str(context.exception))
+
+    def test_without_attachments_no_process_is_started(self):
+        """Sin adjuntos no se paga el arranque de otro Python."""
+        with patch.object(extraction_worker.subprocess, "run", side_effect=AssertionError("no debería llamarse")):
+            prepared = extraction_worker.prepare_user_content_with_time_limit(
+                "Solo texto", [], "pypdf", 300_000, timeout_s=60
+            )
+        self.assertEqual(prepared.user_content, "Solo texto")
+
+    def test_a_child_that_dies_without_answering_gives_a_clear_error(self):
+        """Si el hijo muere sin contestar (p. ej. sin memoria), error 422 y detalle al log."""
+        dead_child = SimpleNamespace(returncode=1, stdout=b"", stderr=b"MemoryError")
+        with patch.object(extraction_worker.subprocess, "run", return_value=dead_child), \
+                self.assertLogs(extraction_worker.logger, "ERROR"), \
+                self.assertRaises(AttachmentError) as context:
+            extraction_worker.prepare_user_content_with_time_limit(
+                "T", [pdf_attachment()], "pypdf", 300_000, timeout_s=60
+            )
+        self.assertEqual(context.exception.status_code, 422)
 
 
 class PathBStreamingTests(unittest.IsolatedAsyncioTestCase):

@@ -374,6 +374,7 @@ Markdown puede reflejar información del texto utilizado.
 | `MAX_ATTACHMENTS` / `MAX_ATTACHMENT_MB` | Límite de adjuntos por petición (5) y de tamaño por fichero (10 MB) |
 | `MAX_ATTACHMENT_CHARS` | Caracteres de texto que pueden sumar los adjuntos (300000); si se pasa, 413, nunca se recorta en silencio |
 | `MAX_PDF_PAGES` / `MAX_DOCX_UNCOMPRESSED_MB` | Topes que se miran antes de abrir el fichero: páginas de un PDF (300) y tamaño de un Word descomprimido (50 MB). Cortan PDF de miles de páginas y «bombas ZIP» con un 413 |
+| `ATTACHMENT_EXTRACTION_TIMEOUT_S` | Camino B: segundos como máximo para extraer el texto (30). La extracción va en un proceso aparte que se cancela si se pasa, así un documento trucado no cuelga la API. `0` = sin límite, solo para depurar |
 
 El entorno tiene prioridad sobre `.env`, y este sobre los valores predeterminados
 de `config.py`. Reinicia la aplicación cuando cambies la configuración.

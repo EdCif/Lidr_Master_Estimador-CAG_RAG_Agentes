@@ -88,6 +88,11 @@ class Settings(BaseSettings):
     # ZIP) de 10 MB puede ocupar gigas al descomprimirlo.
     max_pdf_pages: int = Field(default=300, ge=1)
     max_docx_uncompressed_mb: float = Field(default=50, gt=0)
+    # Camino B: tiempo máximo para extraer el texto de los adjuntos. La
+    # extracción va en un proceso aparte que se mata si se pasa (ver
+    # attachments/extraction_worker.py). Con 0 se extrae en la propia API,
+    # sin proceso aparte ni límite: solo para depurar.
+    attachment_extraction_timeout_s: float = Field(default=30, ge=0)
 
     @field_validator("openai_api_key", "llm_model", mode="before")
     @classmethod

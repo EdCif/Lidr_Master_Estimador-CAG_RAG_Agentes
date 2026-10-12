@@ -31,7 +31,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from app.services.attachments import path_a_files_api, path_b_local
+from app.services.attachments import extraction_worker, path_a_files_api, path_b_local
 from app.services.attachments.common import (
     Attachment,
     AttachmentError,
@@ -73,6 +73,8 @@ class TurnSettings:
     max_tokens: int
     pdf_extractor: str
     max_attachment_chars: int
+    # Camino B: segundos como máximo para extraer el texto (0 = sin límite).
+    extraction_timeout_s: float = 30.0
 
 
 async def stream_estimation_turn(
@@ -117,17 +119,31 @@ async def stream_estimation_turn(
                     yield TurnEvent("delta", {"text": text})
         else:
             # Camino B: extraer texto es trabajo de CPU (puede tardar con un
-            # PDF largo). asyncio.to_thread lo manda a otro hilo para que el
-            # servidor siga atendiendo otras peticiones mientras tanto.
+            # PDF largo). Lo hacemos en un proceso aparte con tiempo máximo:
+            # si un documento trucado lo deja colgado, se mata ese proceso y
+            # la API sigue funcionando (ver attachments/extraction_worker.py).
+            # asyncio.to_thread hace que la ESPERA tampoco frene al servidor.
             if attachments:
                 yield _status("Extrayendo el texto de los adjuntos en local...")
-            prepared = await asyncio.to_thread(
-                path_b_local.prepare_user_content,
-                transcript,
-                attachments,
-                settings.pdf_extractor,
-                settings.max_attachment_chars,
-            )
+            if settings.extraction_timeout_s > 0:
+                prepared = await asyncio.to_thread(
+                    extraction_worker.prepare_user_content_with_time_limit,
+                    transcript,
+                    attachments,
+                    settings.pdf_extractor,
+                    settings.max_attachment_chars,
+                    settings.extraction_timeout_s,
+                )
+            else:
+                # Sin límite (ATTACHMENT_EXTRACTION_TIMEOUT_S=0): en la propia
+                # API, en otro hilo. Solo para depurar.
+                prepared = await asyncio.to_thread(
+                    path_b_local.prepare_user_content,
+                    transcript,
+                    attachments,
+                    settings.pdf_extractor,
+                    settings.max_attachment_chars,
+                )
             for note in prepared.notes:
                 yield _status(note)
             messages = session.history.to_messages_list(pending_user_content=prepared.user_content)

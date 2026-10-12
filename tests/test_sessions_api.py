@@ -58,6 +58,7 @@ def fake_settings(**overrides):
         max_attachment_chars=300_000,
         max_pdf_pages=300,
         max_docx_uncompressed_mb=50,
+        attachment_extraction_timeout_s=30,
         max_turns=6,
         max_sessions=500,
     )

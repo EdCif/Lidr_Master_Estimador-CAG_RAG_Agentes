@@ -268,8 +268,9 @@ def prepare_user_content(
     """Extrae todos los adjuntos y monta el mensaje del usuario (texto plano).
 
     Es una función normal (no async) porque extraer texto es trabajo de CPU.
-    El servicio la ejecuta con asyncio.to_thread para no bloquear al
-    servidor mientras tanto.
+    El servicio no la llama directamente: la ejecuta en un proceso aparte
+    con tiempo máximo (``extraction_worker.py``), para que un documento
+    trucado no pueda dejar colgada la API.
 
     Si el texto de los adjuntos supera ``max_chars`` NO lo recortamos a
     escondidas: devolvemos un error. Un recorte silencioso haría que el

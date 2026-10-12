@@ -204,6 +204,7 @@ def get_turn_settings(settings=Depends(get_settings)) -> TurnSettings:
         max_tokens=settings.session_max_tokens,
         pdf_extractor=settings.pdf_extractor,
         max_attachment_chars=settings.max_attachment_chars,
+        extraction_timeout_s=settings.attachment_extraction_timeout_s,
     )
 
 

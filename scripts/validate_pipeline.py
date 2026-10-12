@@ -45,6 +45,7 @@ REQUIRED_FILES = (
     "app/services/attachments/common.py",
     "app/services/attachments/path_a_files_api.py",
     "app/services/attachments/path_b_local.py",
+    "app/services/attachments/extraction_worker.py",
     "app/schemas/__init__.py",
     "app/schemas/estimation.py",
     "app/schemas/idea.py",
