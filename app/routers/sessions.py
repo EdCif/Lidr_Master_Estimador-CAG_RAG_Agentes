@@ -32,12 +32,13 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from fastapi.sse import EventSourceResponse, ServerSentEvent
 
 from app.config import get_settings
-from app.schemas.session import SessionCreated, SessionState
+from app.schemas.session import SessionCreateRequest, SessionCreated, SessionState
 from app.services.attachments.common import Attachment, AttachmentError, validate_attachment
 from app.services.conversation_service import AttachmentMode, TurnSettings, stream_estimation_turn
 from app.services.prompt_builder import build_session_system_prompt
 from app.services.sessions import (
     Session,
+    SessionExpiredError,
     SessionNotFoundError,
     SessionStore,
 )
@@ -76,6 +77,7 @@ def get_session_store() -> SessionStore:
         system_prompt_builder=build_session_system_prompt,
         max_turns=settings.max_turns,
         max_sessions=settings.max_sessions,
+        ttl_seconds=settings.session_ttl_seconds,
     )
 
 
@@ -87,21 +89,52 @@ def get_existing_session(
     session_id: UUID,
     store: SessionStore = Depends(get_session_store),
 ) -> Session:
-    """Busca la sesión de la URL y, si no existe, responde 404 con una pista útil.
+    """Busca la sesión de la URL. Si no se puede usar, responde 404 o 410.
 
     Declarar session_id como UUID hace que FastAPI rechace con un 422 los
     identificadores mal formados antes de llegar aquí. str(session_id) lo
     deja en el formato en que lo guardamos (minúsculas y con guiones), aunque
     el cliente lo mande en mayúsculas.
+
+    * 404 (Not Found): no la conocemos (nunca existió, o el servidor se
+      reinició y se perdió).
+    * 410 (Gone, "ya no está"): existió, pero lleva más tiempo del TTL sin
+      actividad y se ha archivado. La respuesta incluye su memoria y las dos
+      opciones que tiene el cliente: empezar de cero o heredar esa memoria.
+      Streamlit (Paso 04) usa esta información para mostrar dos botones.
     """
     try:
         return store.get(str(session_id))
+    except SessionExpiredError as expired:
+        archived = expired.archived
+        minutes = int(store.ttl.total_seconds() // 60)
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={
+                "message": (
+                    f"La sesión lleva más de {minutes} minutos sin actividad y se ha archivado. "
+                    "Puedes empezar una sesión nueva de cero, o una nueva que herede su "
+                    "memoria (los hechos del proyecto); el historial no se conserva."
+                ),
+                "session_id": archived.session_id,
+                "archived_at": archived.archived_at.isoformat(),
+                "project_metadata": archived.metadata.model_dump(),
+                "options": {
+                    "new": {"method": "POST", "path": "/sessions", "body": None},
+                    "inherit": {
+                        "method": "POST",
+                        "path": "/sessions",
+                        "body": {"inherit_from": archived.session_id},
+                    },
+                },
+            },
+        ) from None
     except SessionNotFoundError:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=(
-                "La sesión no existe o ha caducado (el servidor se ha reiniciado "
-                "o se ha superado el límite de sesiones). Crea una nueva con POST /sessions."
+                "La sesión no existe (puede que el servidor se haya reiniciado o que "
+                "se superase el límite de sesiones). Crea una nueva con POST /sessions."
             ),
         ) from None
 
@@ -225,28 +258,50 @@ def get_turn_settings(settings=Depends(get_settings)) -> TurnSettings:
 # ---------------------------------------------------------------------------
 
 @router.post("", response_model=SessionCreated, status_code=status.HTTP_201_CREATED)
-async def create_session(store: SessionStore = Depends(get_session_store)):
-    """Crea una sesión vacía y devuelve su session_id.
+async def create_session(
+    request: SessionCreateRequest | None = None,
+    store: SessionStore = Depends(get_session_store),
+):
+    """Crea una sesión y devuelve su session_id.
 
     Respondemos 201 (Created) en lugar de 200 porque la petición crea algo
-    nuevo en el servidor. La sesión nace sin historial y con la ficha del
-    proyecto vacía; se irá llenando con cada llamada a /estimate.
+    nuevo en el servidor. La sesión nace sin historial. La ficha del proyecto
+    nace vacía, salvo que el cuerpo traiga ``{"inherit_from": "<id>"}``:
+    entonces hereda una copia de la ficha de esa sesión (viva o caducada).
+    Si esa sesión no existe, 404.
     """
-    session = store.create()
-    return SessionCreated(session_id=session.session_id)
+    inherit_from = str(request.inherit_from) if request and request.inherit_from else None
+    try:
+        session = store.create(inherit_from=inherit_from)
+    except SessionNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No hay ninguna sesión (viva ni archivada) con ese id de la que heredar la memoria.",
+        ) from None
+    return SessionCreated(
+        session_id=session.session_id,
+        inherited_from=session.inherited_from,
+        project_metadata=session.metadata,
+    )
 
 
 @router.get("/{session_id}", response_model=SessionState)
-async def get_session(session: Session = Depends(get_existing_session)):
+async def get_session(
+    session: Session = Depends(get_existing_session),
+    store: SessionStore = Depends(get_session_store),
+):
     """Devuelve la memoria y el historial actuales de una sesión.
 
     Es de solo lectura: consultar una sesión no cambia ni su historial ni su
-    ficha (solo la marca como usada, para que no sea la primera en borrarse).
+    ficha. Sí cuenta como actividad: la marca como usada y reinicia la
+    cuenta atrás de su caducidad (expires_at).
     """
     return SessionState(
         session_id=session.session_id,
         created_at=session.created_at,
         updated_at=session.updated_at,
+        expires_at=store.expires_at(session),
+        inherited_from=session.inherited_from,
         max_turns=session.history.max_turns,
         turn_count=session.history.turn_count,
         discarded_turns=session.history.discarded_turns,

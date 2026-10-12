@@ -6,17 +6,37 @@ función de prueba que solo escribe la ficha del proyecto en texto.
 
 import unittest
 import uuid
+from datetime import datetime, timedelta, timezone
 
 from pydantic import ValidationError
 
 from app.services.sessions import (
     DEFAULT_MAX_TURNS,
+    MAX_FACT_CHARS,
+    MAX_TECHNOLOGIES,
     ConversationHistory,
     ProjectMetadata,
     Session,
+    SessionExpiredError,
     SessionNotFoundError,
     SessionStore,
 )
+
+
+class FakeClock:
+    """Reloj de mentira: marca la hora que digamos y se puede adelantar.
+
+    Así probamos que una sesión caduca a la hora sin esperar una hora.
+    """
+
+    def __init__(self) -> None:
+        self.now = datetime(2026, 10, 12, 9, 0, tzinfo=timezone.utc)
+
+    def __call__(self) -> datetime:
+        return self.now
+
+    def advance(self, **delta: float) -> None:
+        self.now += timedelta(**delta)
 
 
 def fake_prompt_builder(metadata: ProjectMetadata) -> str:
@@ -294,6 +314,111 @@ class SessionStoreTests(unittest.TestCase):
 
         self.assertNotIn(session.session_id, store)
         self.assertEqual(len(store), 0)
+
+
+class SessionTtlTests(unittest.TestCase):
+    """Paso 01.4: caducidad por inactividad (TTL), archivado y memoria heredada."""
+
+    def setUp(self):
+        self.clock = FakeClock()
+        self.store = SessionStore(fake_prompt_builder, ttl_seconds=3600, clock=self.clock)
+
+    def test_a_session_used_within_the_hour_stays_alive(self):
+        session = self.store.create()
+
+        self.clock.advance(minutes=59)
+
+        self.assertIs(self.store.get(session.session_id), session)
+
+    def test_activity_restarts_the_countdown(self):
+        """Usarla a los 50 minutos le da otra hora entera."""
+        session = self.store.create()
+        self.clock.advance(minutes=50)
+        self.store.get(session.session_id)
+
+        self.clock.advance(minutes=50)  # 100 minutos desde que se creó
+
+        self.assertIs(self.store.get(session.session_id), session)
+        self.assertEqual(self.store.expires_at(session), self.clock.now + timedelta(hours=1))
+
+    def test_after_an_hour_without_activity_it_expires_and_keeps_only_its_memory(self):
+        session = self.store.create()
+        session.metadata = ProjectMetadata(project_name="Portal", assumed_team_size=3)
+        session.history.add_turn("hola", "respuesta")
+
+        self.clock.advance(minutes=61)
+        with self.assertRaises(SessionExpiredError) as context:
+            self.store.get(session.session_id)
+
+        archived = context.exception.archived
+        self.assertEqual(archived.metadata.project_name, "Portal")
+        self.assertEqual(archived.archived_at, self.clock.now)
+        self.assertNotIn(session.session_id, self.store)  # ya no está entre las vivas
+        # Pedirla otra vez sigue diciendo "caducada" (no "no existe").
+        with self.assertRaises(SessionExpiredError):
+            self.store.get(session.session_id)
+
+    def test_creating_a_session_archives_the_expired_ones(self):
+        """Limpieza "perezosa": no hace falta que nadie vuelva a pedir la vieja."""
+        old = self.store.create()
+        self.clock.advance(hours=2)
+
+        self.store.create()
+
+        self.assertEqual(len(self.store), 1)
+        self.assertIsNotNone(self.store.get_archived(old.session_id))
+
+    def test_new_session_can_inherit_the_memory_of_an_expired_one(self):
+        old = self.store.create()
+        old.metadata = ProjectMetadata(project_name="Portal", mentioned_technologies=["React"])
+        old.history.add_turn("hola", "respuesta")
+        self.clock.advance(hours=2)
+
+        new = self.store.create(inherit_from=old.session_id)
+
+        self.assertNotEqual(new.session_id, old.session_id)
+        self.assertEqual(new.inherited_from, old.session_id)
+        self.assertEqual(new.metadata.project_name, "Portal")
+        self.assertEqual(new.history.turn_count, 0)  # el historial NO se hereda
+        # Es una copia: cambiar la nueva no toca la archivada.
+        new.metadata = ProjectMetadata(project_name="Otro")
+        self.assertEqual(self.store.get_archived(old.session_id).metadata.project_name, "Portal")
+
+    def test_inheriting_from_an_unknown_session_fails(self):
+        with self.assertRaises(SessionNotFoundError):
+            self.store.create(inherit_from=str(uuid.uuid4()))
+
+    def test_the_archive_is_also_capped(self):
+        store = SessionStore(fake_prompt_builder, max_sessions=2, ttl_seconds=60, clock=self.clock)
+        ids = []
+        for _ in range(4):
+            ids.append(store.create().session_id)
+            self.clock.advance(minutes=2)
+        store.create()  # archiva las caducadas
+
+        self.assertIsNone(store.get_archived(ids[0]))  # la más antigua ya no cabe
+        self.assertIsNotNone(store.get_archived(ids[-1]))
+
+
+class MemoryCapsTests(unittest.TestCase):
+    """La ficha viaja en cada system prompt: no puede crecer sin control."""
+
+    def test_very_long_texts_are_cut(self):
+        metadata = ProjectMetadata(project_name="x" * 5000, agreed_scope="y" * 5000)
+
+        self.assertEqual(len(metadata.project_name), MAX_FACT_CHARS)
+        self.assertEqual(len(metadata.agreed_scope), MAX_FACT_CHARS)
+
+    def test_technology_list_has_a_ceiling_and_keeps_the_first_ones(self):
+        names = [f"tec{i}" for i in range(500)] + ["una frase larguísima que no es ninguna tecnología" * 2]
+
+        metadata = ProjectMetadata(mentioned_technologies=names)
+
+        self.assertEqual(len(metadata.mentioned_technologies), MAX_TECHNOLOGIES)
+        self.assertEqual(metadata.mentioned_technologies[0], "tec0")
+
+    def test_absurd_team_sizes_are_ignored(self):
+        self.assertIsNone(ProjectMetadata(assumed_team_size=50_000).assumed_team_size)
 
 
 if __name__ == "__main__":

@@ -25,6 +25,10 @@ Las dos piezas viven dentro de una ``Session``, y las sesiones se guardan en
 un ``SessionStore``, que por dentro es un diccionario de Python indexado por
 ``session_id``.
 
+Para que nada crezca sin control, una sesión que pasa una hora sin
+actividad caduca (TTL): se archiva solo su ficha y el cliente puede empezar
+una sesión nueva de cero o heredando esa memoria (ver ``SessionStore``).
+
 Por qué en memoria del proceso y no en una base de datos
 --------------------------------------------------------
 Es relevante en este momento del curso para aprender aunque lo suyo es que fuera en una Base de Datos:
@@ -49,7 +53,8 @@ import threading
 import uuid
 from collections import OrderedDict
 from collections.abc import Callable
-from datetime import datetime, timezone
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -71,6 +76,29 @@ DEFAULT_MAX_TURNS = 6
 # supera, se borra la sesión que lleva más tiempo sin usarse. También se puede
 # cambiar desde el .env (MAX_SESSIONS).
 DEFAULT_MAX_SESSIONS = 500
+
+# Una sesión que lleva más de este tiempo sin actividad caduca: se archiva y
+# el cliente puede empezar otra de cero o heredando su memoria. Así ni la
+# memoria ni el historial crecen sin control. Se cambia con
+# SESSION_TTL_SECONDS en el .env (TTL = time to live, "tiempo de vida").
+DEFAULT_SESSION_TTL_SECONDS = 60 * 60
+
+# Topes de la ficha del proyecto (la memoria). Viaja en el system prompt de
+# cada llamada al modelo, así que no puede crecer sin límite: un dato enorme
+# o una lista de miles de tecnologías encarecería todas las llamadas.
+MAX_FACT_CHARS = 200
+MAX_TEAM_SIZE = 1000
+MAX_TECHNOLOGIES = 30
+MAX_TECHNOLOGY_CHARS = 50
+
+# El "reloj" que usan las sesiones para saber la hora. Normalmente es la hora
+# real; los tests pasan uno falso para "adelantar" una hora sin esperarla.
+Clock = Callable[[], datetime]
+
+
+def utc_now() -> datetime:
+    """La hora actual en UTC (la hora universal, sin líos de horario de verano)."""
+    return datetime.now(timezone.utc)
 
 # El contenido de un mensaje puede ser un texto o una lista de bloques
 # (texto + documentos). La lista es el formato que usaremos en el Camino A
@@ -140,10 +168,20 @@ class ProjectMetadata(BaseModel):
     @field_validator("project_name", "agreed_scope", mode="before")
     @classmethod
     def blank_text_is_none(cls, value: object) -> object:
-        """Un texto vacío ("" o solo espacios) significa que no lo sabemos."""
-        if isinstance(value, str) and not value.strip():
+        """Un texto vacío significa "no lo sabemos"; uno larguísimo se recorta.
+
+        La ficha viaja en el system prompt de CADA llamada al modelo: un dato
+        de miles de caracteres encarecería todas las siguientes. Un nombre de
+        proyecto o un alcance pactado caben de sobra en MAX_FACT_CHARS.
+        """
+        if not isinstance(value, str):
+            return value
+        text = value.strip()
+        if not text:
             return None
-        return value
+        if len(text) > MAX_FACT_CHARS:
+            text = text[: MAX_FACT_CHARS - 1].rstrip() + "…"
+        return text
 
     @field_validator("assumed_team_size", mode="before")
     @classmethod
@@ -164,7 +202,8 @@ class ProjectMetadata(BaseModel):
         except (TypeError, ValueError, OverflowError):
             # OverflowError: float("inf") existe, pero no cabe en un int.
             return None
-        return size if size >= 1 else None
+        # Un "equipo de 50.000 personas" no es un dato útil, es un error.
+        return size if 1 <= size <= MAX_TEAM_SIZE else None
 
     @field_validator("mentioned_technologies", mode="before")
     @classmethod
@@ -175,6 +214,12 @@ class ProjectMetadata(BaseModel):
         ("Python, React"), por si el extractor se equivoca de formato. Las
         repetidas se comparan sin distinguir mayúsculas ("react" y "React"
         son la misma) y se conserva la primera forma en que aparecieron.
+
+        Topes, para que la memoria no crezca sin control (va en cada system
+        prompt): como mucho MAX_TECHNOLOGIES tecnologías, y se descartan los
+        "nombres" de más de MAX_TECHNOLOGY_CHARS caracteres, que no son
+        tecnologías sino frases. Al llenarse, se conservan las primeras: lo
+        que ya sabíamos no se pierde por lo que llega después.
         """
         if value is None:
             return []
@@ -187,9 +232,11 @@ class ProjectMetadata(BaseModel):
         seen: set[str] = set()
         for item in value:
             name = str(item).strip()
-            if name and name.casefold() not in seen:
+            if name and len(name) <= MAX_TECHNOLOGY_CHARS and name.casefold() not in seen:
                 seen.add(name.casefold())
                 clean.append(name)
+                if len(clean) == MAX_TECHNOLOGIES:
+                    break
         return clean
 
     def is_empty(self) -> bool:
@@ -336,11 +383,19 @@ class Session:
         session_id: str,
         system_prompt_builder: SystemPromptBuilder,
         max_turns: int = DEFAULT_MAX_TURNS,
+        clock: Clock = utc_now,
+        metadata: ProjectMetadata | None = None,
+        inherited_from: str | None = None,
     ) -> None:
         self.session_id = session_id
-        self.created_at = datetime.now(timezone.utc)
+        self._clock = clock
+        self.created_at = clock()
+        # Última actividad: con ella decide el almacén si la sesión ha caducado.
         self.updated_at = self.created_at
-        self.metadata = ProjectMetadata()
+        # La memoria empieza vacía, salvo que la sesión herede la de otra
+        # (Paso 01.4): entonces llega ya rellena y se apunta de quién vino.
+        self.metadata = metadata or ProjectMetadata()
+        self.inherited_from = inherited_from
         self.history = ConversationHistory(
             system_prompt_factory=lambda: system_prompt_builder(self.metadata),
             max_turns=max_turns,
@@ -351,8 +406,8 @@ class Session:
         self.uploaded_files: list[dict[str, str]] = []
 
     def touch(self) -> None:
-        """Marca la sesión como usada ahora mismo."""
-        self.updated_at = datetime.now(timezone.utc)
+        """Marca la sesión como usada ahora mismo (reinicia la cuenta del TTL)."""
+        self.updated_at = self._clock()
 
 
 # ---------------------------------------------------------------------------
@@ -368,6 +423,34 @@ class SessionNotFoundError(KeyError):
     """
 
 
+@dataclass(frozen=True)
+class ArchivedSession:
+    """Lo que guardamos de una sesión caducada: solo su ficha, no el historial.
+
+    El historial (todas las palabras de la conversación) es lo que más ocupa
+    y ya no se va a usar. La ficha son unas pocas líneas y es justo lo que
+    hace falta para ofrecer "empezar de nuevo con la memoria heredada".
+    """
+
+    session_id: str
+    metadata: ProjectMetadata
+    last_activity: datetime
+    archived_at: datetime
+
+
+class SessionExpiredError(Exception):
+    """La sesión existía, pero lleva demasiado tiempo sin actividad (TTL).
+
+    Ya se ha archivado. Lleva consigo su ficha para que el endpoint pueda
+    ofrecer al cliente las dos opciones: sesión nueva de cero, o sesión nueva
+    heredando esta memoria. En la API se traduce a un 410 (Gone, "ya no está").
+    """
+
+    def __init__(self, archived: ArchivedSession) -> None:
+        super().__init__(archived.session_id)
+        self.archived = archived
+
+
 class SessionStore:
     """Las sesiones vivas, guardadas en un diccionario en memoria del proceso.
 
@@ -376,6 +459,20 @@ class SessionStore:
     primera es siempre la que lleva más tiempo sin usarse. Cuando superamos
     ``max_sessions``, borramos esa primera. Es la política LRU (least recently
     used, "la menos usada recientemente").
+
+    Caducidad (TTL, Paso 01.4)
+    --------------------------
+    Una sesión sin actividad durante más de ``ttl_seconds`` (1 hora por
+    defecto) caduca: se archiva y quien la pida recibe ``SessionExpiredError``
+    con su ficha, para ofrecerle empezar de cero o heredar la memoria.
+
+    No hay ningún reloj de fondo vigilando. La comprobación es "perezosa":
+    se hace al pedir una sesión (``get``) y, de paso, cada vez que se crea
+    una nueva (``create`` archiva todas las caducadas). Es más simple que un
+    hilo que se despierta cada minuto y, para este volumen, igual de eficaz.
+
+    El archivo guarda solo la ficha de cada sesión y también tiene tope
+    (``max_sessions``): ni la memoria ni el historial crecen sin control.
 
     Volatilidad: todo vive en la RAM del proceso de uvicorn. Al reiniciar se
     pierde, y con varios workers cada uno tendría su propio almacén. El
@@ -387,31 +484,88 @@ class SessionStore:
         system_prompt_builder: SystemPromptBuilder,
         max_turns: int = DEFAULT_MAX_TURNS,
         max_sessions: int = DEFAULT_MAX_SESSIONS,
+        ttl_seconds: int = DEFAULT_SESSION_TTL_SECONDS,
+        clock: Clock = utc_now,
     ) -> None:
         if max_sessions < 1:
             raise ValueError("max_sessions tiene que ser al menos 1.")
+        if ttl_seconds < 1:
+            raise ValueError("ttl_seconds tiene que ser al menos 1.")
         self._system_prompt_builder = system_prompt_builder
         self.max_turns = max_turns
         self.max_sessions = max_sessions
+        self.ttl = timedelta(seconds=ttl_seconds)
+        self._clock = clock
         self._sessions: OrderedDict[str, Session] = OrderedDict()
+        self._archived: OrderedDict[str, ArchivedSession] = OrderedDict()
         # FastAPI atiende los endpoints síncronos desde varios hilos a la vez.
         # El candado evita que dos peticiones simultáneas pisen el diccionario
         # mientras uno añade una sesión y otro reordena o borra.
         self._lock = threading.Lock()
 
-    def create(self) -> Session:
-        """Crea una sesión vacía con un identificador UUID v4 y la guarda.
+    # --- Caducidad ----------------------------------------------------------
+
+    def expires_at(self, session: Session) -> datetime:
+        """Hora a la que caducará la sesión si nadie la vuelve a usar."""
+        return session.updated_at + self.ttl
+
+    def _is_expired(self, session: Session, now: datetime) -> bool:
+        return now - session.updated_at > self.ttl
+
+    def _archive(self, session: Session, now: datetime) -> ArchivedSession:
+        """Saca una sesión de las vivas y guarda solo su ficha. Con el candado cogido."""
+        self._sessions.pop(session.session_id, None)
+        archived = ArchivedSession(
+            session_id=session.session_id,
+            metadata=session.metadata.model_copy(deep=True),
+            last_activity=session.updated_at,
+            archived_at=now,
+        )
+        self._archived[session.session_id] = archived
+        if len(self._archived) > self.max_sessions:
+            self._archived.popitem(last=False)
+        return archived
+
+    def _archive_expired(self, now: datetime) -> None:
+        """Archiva todas las sesiones caducadas. Con el candado cogido."""
+        for session in [s for s in self._sessions.values() if self._is_expired(s, now)]:
+            self._archive(session, now)
+
+    # --- Lo que usan los endpoints ------------------------------------------
+
+    def create(self, inherit_from: str | None = None) -> Session:
+        """Crea una sesión nueva con un identificador UUID v4 y la guarda.
 
         UUID v4 son 122 bits aleatorios: no se pueden adivinar ni chocan en
         la práctica, así que nadie puede colarse en la sesión de otro
         probando números seguidos.
+
+        Con ``inherit_from`` la sesión nueva empieza con el historial vacío
+        pero con una COPIA de la ficha de otra sesión (viva o archivada).
+        Copia y no la misma ficha: así lo que cambie en la nueva no toca la
+        antigua. Si esa sesión no existe, ``SessionNotFoundError``.
         """
-        session = Session(
-            session_id=str(uuid.uuid4()),
-            system_prompt_builder=self._system_prompt_builder,
-            max_turns=self.max_turns,
-        )
         with self._lock:
+            now = self._clock()
+            # De paso, archivamos las caducadas: así la memoria se libera
+            # aunque nadie vuelva a pedirlas.
+            self._archive_expired(now)
+
+            metadata = None
+            if inherit_from is not None:
+                source = self._sessions.get(inherit_from) or self._archived.get(inherit_from)
+                if source is None:
+                    raise SessionNotFoundError(inherit_from)
+                metadata = source.metadata.model_copy(deep=True)
+
+            session = Session(
+                session_id=str(uuid.uuid4()),
+                system_prompt_builder=self._system_prompt_builder,
+                max_turns=self.max_turns,
+                clock=self._clock,
+                metadata=metadata,
+                inherited_from=inherit_from,
+            )
             self._sessions[session.session_id] = session
             if len(self._sessions) > self.max_sessions:
                 # last=False saca el primer elemento: el que más tiempo lleva
@@ -420,15 +574,32 @@ class SessionStore:
         return session
 
     def get(self, session_id: str) -> Session:
-        """Devuelve la sesión o lanza ``SessionNotFoundError`` si no existe."""
+        """Devuelve la sesión y la marca como usada.
+
+        * Si nunca existió (o se perdió al reiniciar): ``SessionNotFoundError``.
+        * Si existe pero ha caducado, o ya estaba archivada:
+          ``SessionExpiredError``, con su ficha.
+        """
         with self._lock:
+            now = self._clock()
             session = self._sessions.get(session_id)
             if session is None:
+                archived = self._archived.get(session_id)
+                if archived is not None:
+                    raise SessionExpiredError(archived)
                 raise SessionNotFoundError(session_id)
-            # Recién usada: la pasamos al final de la cola de borrado.
+            if self._is_expired(session, now):
+                raise SessionExpiredError(self._archive(session, now))
+            # Recién usada: la pasamos al final de la cola de borrado y
+            # reiniciamos su cuenta atrás.
             self._sessions.move_to_end(session_id)
-        session.touch()
+            session.touch()
         return session
+
+    def get_archived(self, session_id: str) -> ArchivedSession | None:
+        """La ficha archivada de una sesión caducada, o None si no está."""
+        with self._lock:
+            return self._archived.get(session_id)
 
     def delete(self, session_id: str) -> None:
         """Borra la sesión. Si ya no existía, no pasa nada."""

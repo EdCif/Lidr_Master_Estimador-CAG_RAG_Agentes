@@ -369,6 +369,7 @@ Markdown puede reflejar información del texto utilizado.
 | `SESSION_MAX_TOKENS` | Techo de tokens de salida de cada respuesta, razonamiento incluido (64000) |
 | `MAX_TURNS` | Ventana del historial: turnos (pregunta + respuesta) que viajan en cada llamada, contando la pregunta nueva (6). La memoria `project_metadata` no se recorta |
 | `MAX_SESSIONS` | Sesiones a la vez en memoria; al pasarse se borra la menos usada (500) |
+| `SESSION_TTL_SECONDS` | Caducidad de una sesión sin actividad (3600 = 1 hora). Al caducar se archiva solo su ficha; `GET` o `estimate` responden 410 con dos opciones: sesión nueva de cero o heredando la memoria (`POST /sessions` con `{"inherit_from": "<id>"}`) |
 | `ATTACHMENT_MODE` | Camino de adjuntos por defecto: `local` (B, defecto) o `files_api` (A) |
 | `PDF_EXTRACTOR` | Camino B: `pypdf` (defecto) o `markitdown` |
 | `MAX_ATTACHMENTS` / `MAX_ATTACHMENT_MB` | Límite de adjuntos por petición (5) y de tamaño por fichero (10 MB) |

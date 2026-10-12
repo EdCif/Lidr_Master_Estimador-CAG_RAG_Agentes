@@ -115,6 +115,7 @@ class PromptFollowsTheMemoryTests(unittest.TestCase):
         with patch("app.routers.sessions.get_settings") as fake_settings:
             fake_settings.return_value.max_turns = 6
             fake_settings.return_value.max_sessions = 500
+            fake_settings.return_value.session_ttl_seconds = 3600
             session = get_session_store().create()
 
         session.metadata = ProjectMetadata(project_name="Portal")

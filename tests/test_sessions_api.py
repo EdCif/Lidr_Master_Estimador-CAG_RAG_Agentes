@@ -61,6 +61,7 @@ def fake_settings(**overrides):
         attachment_extraction_timeout_s=30,
         max_turns=6,
         max_sessions=500,
+        session_ttl_seconds=3600,
     )
     values.update(overrides)
     return SimpleNamespace(**values)
@@ -82,7 +83,8 @@ class SessionsApiTests(unittest.TestCase):
         response = self.client.post("/sessions")
 
         self.assertEqual(response.status_code, 201)
-        self.assertEqual(list(response.json()), ["session_id"])
+        self.assertEqual(list(response.json()), ["session_id", "inherited_from", "project_metadata"])
+        self.assertIsNone(response.json()["inherited_from"])
         session_id = response.json()["session_id"]
         self.assertEqual(uuid.UUID(session_id).version, 4)
         self.assertIn(session_id, self.store)
@@ -137,6 +139,44 @@ class SessionsApiTests(unittest.TestCase):
         # Con ventana 3: solo quedan los 3 últimos turnos; los 2 primeros se descartan.
         self.assertEqual(session.history.turn_count, 3)
         self.assertEqual(session.history.discarded_turns, 2)
+
+    def test_expired_session_returns_410_with_its_memory_and_both_options(self):
+        """Paso 01.4: tras una hora sin actividad, 410 y las dos salidas posibles."""
+        from datetime import timedelta
+
+        session_id = self.client.post("/sessions").json()["session_id"]
+        self.store.get(session_id).metadata = ProjectMetadata(project_name="Portal de reservas")
+        # Simulamos que pasaron 2 horas desde la última actividad.
+        self.store.get(session_id).updated_at -= timedelta(hours=2)
+
+        response = self.client.get(f"/sessions/{session_id}")
+
+        self.assertEqual(response.status_code, 410)
+        detail = response.json()["detail"]
+        self.assertEqual(detail["project_metadata"]["project_name"], "Portal de reservas")
+        self.assertEqual(detail["options"]["inherit"]["body"], {"inherit_from": session_id})
+        self.assertIn("sin actividad", detail["message"])
+
+    def test_post_sessions_can_inherit_the_memory_of_another_session(self):
+        old_id = self.client.post("/sessions").json()["session_id"]
+        self.store.get(old_id).metadata = ProjectMetadata(project_name="Portal", assumed_team_size=3)
+
+        response = self.client.post("/sessions", json={"inherit_from": old_id})
+
+        self.assertEqual(response.status_code, 201)
+        body = response.json()
+        self.assertNotEqual(body["session_id"], old_id)
+        self.assertEqual(body["inherited_from"], old_id)
+        self.assertEqual(body["project_metadata"]["project_name"], "Portal")
+        state = self.client.get(f"/sessions/{body['session_id']}").json()
+        self.assertEqual(state["history"], [])  # memoria heredada, historial vacío
+        self.assertEqual(state["inherited_from"], old_id)
+        self.assertIn("expires_at", state)
+
+    def test_inheriting_from_an_unknown_session_returns_404(self):
+        response = self.client.post("/sessions", json={"inherit_from": str(uuid.uuid4())})
+
+        self.assertEqual(response.status_code, 404)
 
     def test_session_id_in_uppercase_finds_the_same_session(self):
         session_id = self.client.post("/sessions").json()["session_id"]

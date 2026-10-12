@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     # Cuántas sesiones caben a la vez en memoria. Al superarlo se borra la que
     # lleva más tiempo sin usarse (LRU), para no llenar la RAM del proceso.
     max_sessions: int = Field(default=500, ge=1)
+    # Caducidad de las sesiones (TTL): segundos sin actividad tras los que una
+    # sesión se archiva. El cliente puede entonces empezar otra de cero o
+    # heredando su memoria. Mínimo 60 para no caducar en mitad de un turno.
+    session_ttl_seconds: int = Field(default=3600, ge=60)
     # Camino de adjuntos por defecto: "local" (B, extraemos el texto aquí) o
     # "files_api" (A, el PDF se sube a Anthropic y Claude lo lee entero).
     # Cada petición puede elegir otro con el campo attachment_mode.
