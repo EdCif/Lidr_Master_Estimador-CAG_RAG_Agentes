@@ -27,6 +27,13 @@ importante lo hace la API de sesiones (``app/routers/sessions.py``):
   de turnos), que es justo la idea de la sesión 5.
 * Si la sesión caduca por inactividad (410), se ofrece empezar de cero o
   heredar la memoria.
+* (Sesión 6) En «Última llamada» se ve la ficha técnica del turno
+  (``turn_observed``): los 13 datos que mide el stress test (tokens, coste,
+  latencia, mensajes en la ventana...). Los calcula la API, no Streamlit.
+* (Sesión 6) El apartado «Evaluadores» aplica a la conversación las tres
+  métricas del stress test (``evals/stress/metrics.py``): presupuesto de
+  latencia, presupuesto de coste y deriva de memoria. Solo miden: si un
+  turno no pasa, el estimador sigue funcionando igual.
 
 Cómo funciona Streamlit (la idea clave para entender este fichero)
 ------------------------------------------------------------------
@@ -50,6 +57,13 @@ import streamlit as st
 from app.config import get_settings
 from app.services.prompt_builder import build_session_system_prompt
 from app.services.sessions import ProjectMetadata
+from evals.stress.metrics import (
+    DEFAULT_COST_BUDGET_USD,
+    DEFAULT_LATENCY_BUDGET_MS,
+    CostBudgetMetric,
+    LatencyBudgetMetric,
+    MemoryDriftMetric,
+)
 
 SETTINGS = get_settings()
 
@@ -78,6 +92,43 @@ FACT_LABELS = {
     "mentioned_technologies": "Tecnologías",
     "agreed_scope": "Alcance acordado",
 }
+
+# Sesión 6 · Los 13 campos de la ficha técnica del turno (turn_observed), en
+# el orden del enunciado, con un nombre que se entienda. El significado de
+# cada uno está en app/services/turn_observer.py.
+OBSERVED_LABELS = {
+    "turn_index": "Turno nº",
+    "session_id": "Sesión",
+    "enriched_transcript_chars": "Transcripción + adjuntos (car.)",
+    "attachments_total_chars": "Texto de los adjuntos (car.)",
+    "messages_in_window": "Mensajes en la ventana",
+    "anchors_count": "Hechos en la memoria",
+    "summary_chars": "Resumen (car.)",
+    "tokens_in": "Tokens de entrada",
+    "tokens_out": "Tokens de salida",
+    "cost_usd": "Coste",
+    "latency_ms": "Latencia en la API",
+    "cache_hit_kind": "Caché",
+    "last_resolved_tier": "Modelo elegido (tier)",
+}
+
+# Y los datos extra que añadimos nosotros, para leer mejor las curvas.
+OBSERVED_EXTRA_LABELS = {
+    "outcome": "Resultado",
+    "ttft_ms": "Hasta el primer trozo (en la API)",
+    "llm_ms": "Llamada al modelo",
+    "reply_chars": "Respuesta visible (car.)",
+    "metadata_chars": "Memoria en el prompt (car.)",
+    "turns_dropped": "Turnos ya descartados",
+    "messages_sent": "Mensajes enviados (con system)",
+    "attachments_count": "Adjuntos",
+    "tokens_source": "Origen de los tokens",
+    "model": "Modelo que contestó",
+    "observed_at": "Hora de la observación",
+}
+
+# Cómo se llama al usuario cada sitio donde busca la deriva de memoria.
+DRIFT_PLACES = {"metadata": "la memoria", "history": "el historial", "reply": "la última respuesta"}
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +312,54 @@ def stream_turn(session_id: str, transcript: str, uploads: list, mode: str, stat
 def format_int(value: int) -> str:
     """Formatea un entero con punto de millares (2445 -> 2.445)."""
     return f"{value:,}".replace(",", ".")
+
+
+def format_cost(value: float | None) -> str:
+    """Coste en dólares con 4 decimales y coma (0.00112 -> "0,0011 $")."""
+    if value is None:
+        return "—"
+    return f"{value:.4f} $".replace(".", ",")
+
+
+def format_seconds(milliseconds: float) -> str:
+    """Milisegundos como segundos con un decimal y coma (15400 -> "15,4 s")."""
+    return f"{milliseconds / 1000:.1f} s".replace(".", ",")
+
+
+def format_observed(field: str, value: object) -> str:
+    """Escribe un dato de turn_observed como se lee mejor en pantalla.
+
+    Los que no existen en nuestro proyecto (resumen, caché, tier) llevan una
+    aclaración para que no parezca un error: ver turn_observer.py.
+    """
+    if value is None:
+        return "—"
+    if field == "cost_usd":
+        return format_cost(value)
+    if field in ("latency_ms", "ttft_ms", "llm_ms"):
+        return format_seconds(value)
+    if field == "session_id":
+        return f"{value[:8]}…"
+    if field == "summary_chars":
+        return f"{value} (no hay resumen)"
+    if field == "cache_hit_kind":
+        return f"{value} (no hay caché)"
+    if field == "last_resolved_tier":
+        return f"`{value}`"
+    if field == "observed_at":
+        return local_time(value)
+    if isinstance(value, int):
+        return format_int(value)
+    return str(value)
+
+
+def observed_table(observed: dict, labels: dict[str, str]) -> str:
+    """Tabla Markdown "dato | valor" con los campos indicados de turn_observed."""
+    rows = [
+        f"| {label}<br>`{field}` | {format_observed(field, observed.get(field))} |"
+        for field, label in labels.items()
+    ]
+    return "| Dato | Valor |\n| --- | --- |\n" + "\n".join(rows)
 
 
 _FACTS_BLOCK = re.compile(r"<hechos_del_proyecto>(.*?)</hechos_del_proyecto>", re.S | re.I)
@@ -625,6 +724,99 @@ with st.sidebar:
         left.metric("Primer token", f"{metrics['first_token_s']:.1f} s")
         right.metric("Tiempo total", f"{metrics['total_s']:.1f} s")
         st.caption(f"Modelo `{metrics['model']}` · camino {'A' if metrics['mode'] == 'files_api' else 'B'}")
+
+    # Sesión 6 · La ficha técnica del último turno, tal como la guarda la API
+    # (GET /sessions/{id} -> last_turn_observed). Es la misma línea JSON que la
+    # API escribe en su consola y la que leerá el stress test.
+    observed = state.get("last_turn_observed")
+    if observed:
+        left, right = st.columns(2)
+        left.metric("Coste", format_cost(observed.get("cost_usd")))
+        right.metric("Turno nº", observed.get("turn_index", "—"))
+        st.markdown("**🔬 Ficha técnica del turno** · `turn_observed`")
+        if observed.get("outcome") == "error":
+            st.warning(f"Este turno falló y no se guardó: {observed.get('error_detail')}")
+        st.caption(
+            "Los 13 datos que mide el stress test de la sesión 6. Los calcula la API, sin "
+            "contar la red: por eso su latencia es algo menor que el «Tiempo total» de arriba, "
+            "que mide Streamlit."
+        )
+        st.markdown(observed_table(observed, OBSERVED_LABELS), unsafe_allow_html=True)
+        with st.expander("Más datos de la observación"):
+            st.markdown(observed_table(observed, OBSERVED_EXTRA_LABELS), unsafe_allow_html=True)
+
+    # Sesión 6 · Evaluadores: las métricas del stress test, aplicadas a esta
+    # conversación. Son las mismas clases que usa la batería de pruebas
+    # (evals/stress/metrics.py); allí cada veredicto es una columna del CSV.
+    st.divider()
+    st.subheader("⚖️ Evaluadores")
+    st.caption(
+        "Juzgan el último turno: ✅ pasa, ❌ no pasa. Solo miden: si un turno no pasa, el "
+        "estimador sigue funcionando igual. En el stress test, cada veredicto es una "
+        "columna del CSV."
+    )
+    if not observed:
+        st.caption("Se activan después del primer turno.")
+    else:
+        # Los presupuestos se pueden cambiar aquí: el veredicto se recalcula al
+        # momento con el mismo turno, sin volver a llamar al modelo.
+        left, right = st.columns(2)
+        budget_s = left.number_input(
+            "Latencia máx. (s)", min_value=1.0, value=DEFAULT_LATENCY_BUDGET_MS / 1000,
+            step=1.0, key="latency_budget_s",
+        )
+        budget_usd = right.number_input(
+            "Coste máx. ($)", min_value=0.0001, value=DEFAULT_COST_BUDGET_USD,
+            step=0.01, format="%.4f", key="cost_budget_usd",
+        )
+
+        latency = LatencyBudgetMetric(round(budget_s * 1000)).evaluate(observed)
+        if "reason" in latency.details:
+            st.markdown(f"❌ **Latencia** · sin dato ({latency.details['reason']})")
+        else:
+            icon = "✅" if latency.passed else "❌"
+            margin = latency.details["margin_ms"]
+            st.markdown(
+                f"{icon} **Latencia** · {format_seconds(latency.details['latency_ms'])} de "
+                f"{format_seconds(latency.details['budget_ms'])} "
+                f"({'sobran' if margin >= 0 else 'se pasa en'} {format_seconds(abs(margin))})"
+            )
+
+        cost = CostBudgetMetric(budget_usd).evaluate(observed)
+        if "reason" in cost.details:
+            st.markdown(f"❌ **Coste** · sin dato ({cost.details['reason']})")
+        else:
+            icon = "✅" if cost.passed else "❌"
+            st.markdown(
+                f"{icon} **Coste** · {format_cost(cost.details['cost_usd'])} de "
+                f"{format_cost(cost.details['budget_usd'])}"
+            )
+
+    # La deriva de memoria necesita saber QUÉ dato buscar. En la batería lo
+    # dice cada conversación sintética; aquí lo escribe el usuario.
+    st.markdown("**🧠 Deriva de memoria**")
+    fact = st.text_input(
+        "¿Sigue vivo este dato en la sesión?",
+        placeholder="p. ej.: nimbus, 30.000 euros, react",
+        key="drift_fact",
+        help="Se busca la palabra exacta, sin distinguir mayúsculas, en la memoria, en el "
+        "historial de la ventana y en la última respuesta.",
+    )
+    if fact.strip():
+        drift = MemoryDriftMetric(fact).evaluate(state)
+        places = [DRIFT_PLACES[place] for place in drift.details["found_in"]]
+        if drift.passed:
+            st.markdown(f"✅ «{fact.strip()}» sigue en {', '.join(places)}.")
+        else:
+            st.markdown(
+                f"❌ «{fact.strip()}» ya no está ni en la memoria, ni en el historial de la "
+                "ventana, ni en la última respuesta: el modelo no lo verá en el próximo turno."
+            )
+    else:
+        st.caption(
+            "Escribe un dato que se dijo antes. En el stress test, cada conversación trae su "
+            "lista de datos a recordar y se comprueban solos en cada turno."
+        )
 
     with st.expander("Ficha y estado en JSON (depuración)"):
         st.json(state, expanded=1)
