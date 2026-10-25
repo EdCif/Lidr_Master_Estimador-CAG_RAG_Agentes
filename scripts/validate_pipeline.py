@@ -60,6 +60,9 @@ REQUIRED_FILES = (
     "app/web/index.html",
     "app/web/app.js",
     "app/web/styles.css",
+    "evals/__init__.py",
+    "evals/stress/__init__.py",
+    "evals/stress/metrics.py",
     "tests/test_estimations.py",
     "tests/test_ideas.py",
     "tests/test_llm_service.py",
@@ -74,6 +77,7 @@ REQUIRED_FILES = (
     "tests/test_integration_sessions.py",
     "tests/test_model_costs.py",
     "tests/test_turn_observer.py",
+    "tests/test_stress_metrics.py",
     "docs/transcripcion_reunion.md",
     "README.md",
     ".env.example",
@@ -138,6 +142,8 @@ def check_structure() -> dict:
     python_files = sorted((PROJECT_ROOT / "app").rglob("*.py"))
     python_files += sorted((PROJECT_ROOT / "tests").rglob("*.py"))
     python_files += sorted((PROJECT_ROOT / "scripts").rglob("*.py"))
+    # Sesión 6: el stress test (métricas, escenarios, runner...).
+    python_files += sorted((PROJECT_ROOT / "evals").rglob("*.py"))
     require(bool(list((PROJECT_ROOT / "tests").glob("test_*.py"))), "No hay pruebas test_*.py.")
     for path in python_files:
         try:
