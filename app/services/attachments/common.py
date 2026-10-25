@@ -86,11 +86,16 @@ class PreparedContent:
       4.210 caracteres extraídos con pypdf"). Se envían como eventos de estado.
     * ``uploaded_files``: en el Camino A, qué ficheros se subieron y con qué
       file_id, para poder consultarlos o borrarlos después.
+    * ``attachment_chars`` (sesión 06): cuántos caracteres de texto suman los
+      adjuntos que hemos convertido nosotros. Lo usa la observación del turno
+      (``turn_observer.py``) para el campo ``attachments_total_chars``. En el
+      Camino A los PDF los lee Anthropic y no conocemos su texto: no cuentan.
     """
 
     user_content: str | list[dict[str, Any]]
     notes: list[str] = field(default_factory=list)
     uploaded_files: list[dict[str, str]] = field(default_factory=list)
+    attachment_chars: int = 0
 
 
 @dataclass

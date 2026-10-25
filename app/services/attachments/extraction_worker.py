@@ -132,7 +132,11 @@ def prepare_user_content_with_time_limit(
         # Un error previsto (PDF sin texto, demasiados caracteres...): lo
         # reconstruimos con su mismo mensaje y su mismo código HTTP.
         raise AttachmentError(result["error"]["message"], status_code=result["error"]["status_code"])
-    return PreparedContent(user_content=result["user_content"], notes=result["notes"])
+    return PreparedContent(
+        user_content=result["user_content"],
+        notes=result["notes"],
+        attachment_chars=result["attachment_chars"],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +160,12 @@ def _worker_main() -> None:
         prepared = path_b_local.prepare_user_content(
             request["transcript"], attachments, request["pdf_extractor"], request["max_chars"]
         )
-        result = {"user_content": prepared.user_content, "notes": prepared.notes}
+        result = {
+            "user_content": prepared.user_content,
+            "notes": prepared.notes,
+            # Sesión 06: si no viaja en el JSON, se perdería por el camino.
+            "attachment_chars": prepared.attachment_chars,
+        }
     except AttachmentError as error:
         result = {"error": {"message": str(error), "status_code": error.status_code}}
     # Cualquier otra excepción deja la salida vacía y el código de salida

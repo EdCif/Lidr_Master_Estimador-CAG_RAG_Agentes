@@ -283,10 +283,12 @@ def prepare_user_content(
         documents.append((attachment.filename, text))
         notes.append(f"{attachment.filename}: {len(text):,} caracteres extraídos con {method}.".replace(",", "."))
 
-    check_text_limit(sum(len(text) for _, text in documents), max_chars)
+    total_chars = sum(len(text) for _, text in documents)
+    check_text_limit(total_chars, max_chars)
     return PreparedContent(
         user_content=build_prompt_with_attachments(transcript, documents),
         notes=notes,
+        attachment_chars=total_chars,
     )
 
 

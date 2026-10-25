@@ -404,6 +404,10 @@ class Session:
         # Anthropic ({"filename": ..., "file_id": ...}). Solo es informativo,
         # para poder verlos con GET /sessions/{id}; caducan solos a las 24 h.
         self.uploaded_files: list[dict[str, str]] = []
+        # Sesión 06: la "ficha técnica" del último turno (tokens, coste,
+        # latencia...), que rellena turn_observer.observe_turn. Es un
+        # TurnObservation; GET /sessions/{id} la devuelve como last_turn_observed.
+        self.last_turn_observed: Any = None
 
     def touch(self) -> None:
         """Marca la sesión como usada ahora mismo (reinicia la cuenta del TTL)."""

@@ -308,6 +308,7 @@ async def get_session(
         project_metadata=session.metadata,
         history=session.history.messages,
         uploaded_files=session.uploaded_files,
+        last_turn_observed=session.last_turn_observed,
     )
 
 

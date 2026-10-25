@@ -332,8 +332,65 @@ class EstimateEndpointTests(unittest.TestCase):
 
         events = parse_sse(self.estimate().text)
 
-        self.assertEqual(events[-1], ("error", {"detail": "No se ha podido conectar con el proveedor del LLM. Reintenta."}))
+        name, data = events[-1]
+        self.assertEqual(name, "error")
+        self.assertEqual(data["detail"], "No se ha podido conectar con el proveedor del LLM. Reintenta.")
+        # Sesión 06: un fallo del proveedor se puede reintentar, y el turno
+        # fallido también deja su observación.
+        self.assertTrue(data["retryable"])
+        self.assertEqual(data["turn_observed"]["outcome"], "error")
         self.assertEqual(self.store.get(self.session_id).history.turn_count, 0)
+
+    # --- Sesión 06: la observación de cada turno (turn_observed) -------------
+
+    def test_done_event_carries_turn_observed_with_the_13_fields(self):
+        """Cada turno deja su ficha técnica con los 13 campos del enunciado."""
+        from app.services.turn_observer import REQUIRED_FIELDS
+
+        transcript = "Necesitamos un portal de reservas."
+        pdf = make_text_pdf("Diagrama: API Gateway y Kafka")
+        files = [("attachments", ("arquitectura.pdf", pdf, "application/pdf"))]
+
+        done = parse_sse(self.estimate(transcript, files=files).text)[-1][1]
+        observed = done["turn_observed"]
+
+        self.assertEqual([f for f in REQUIRED_FIELDS if f not in observed], [])
+        self.assertEqual(observed["turn_index"], 1)
+        self.assertEqual(observed["session_id"], self.session_id)
+        self.assertEqual(observed["attachments_total_chars"], len("Diagrama: API Gateway y Kafka"))
+        self.assertEqual(
+            observed["enriched_transcript_chars"],
+            len(transcript) + observed["attachments_total_chars"],
+        )
+        self.assertEqual(observed["messages_in_window"], 2)  # la pregunta y la respuesta
+        self.assertEqual((observed["tokens_in"], observed["tokens_out"]), (100, 10))
+        # Opus 5.5: 100 × 4 $ / 1M + 10 × 20 $ / 1M = 0,0006 $
+        self.assertAlmostEqual(observed["cost_usd"], 0.0006)
+        self.assertEqual(observed["cache_hit_kind"], "none")
+        self.assertEqual(observed["summary_chars"], 0)
+        self.assertEqual(observed["last_resolved_tier"], "fixed:claude-opus-5-5")
+        self.assertEqual(observed["outcome"], "done")
+        self.assertGreaterEqual(observed["latency_ms"], 0)
+
+    def test_turn_index_keeps_counting_after_the_window_drops_turns(self):
+        """Con una ventana de 2 turnos, el tercer turno es el 3 aunque solo quepan 2."""
+        self.store = SessionStore(system_prompt_builder=lambda metadata: "SYSTEM", max_turns=2)
+        self.session_id = self.client.post("/sessions").json()["session_id"]
+
+        for _ in range(3):
+            done = parse_sse(self.estimate().text)[-1][1]
+
+        observed = done["turn_observed"]
+        self.assertEqual(observed["turn_index"], 3)
+        self.assertEqual(observed["turns_dropped"], 1)
+        self.assertEqual(observed["messages_in_window"], 4)
+
+    def test_get_session_returns_the_same_observation_as_the_done_event(self):
+        done = parse_sse(self.estimate().text)[-1][1]
+
+        state = self.client.get(f"/sessions/{self.session_id}").json()
+
+        self.assertEqual(state["last_turn_observed"], done["turn_observed"])
 
     def test_pdf_without_text_in_path_b_ends_with_error_event(self):
         from doc_factories import make_blank_pdf

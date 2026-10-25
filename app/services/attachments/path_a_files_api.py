@@ -147,7 +147,13 @@ async def prepare_user_content(
         raise _provider_error(error) from error
 
     blocks.append({"type": "text", "text": transcript})
-    return PreparedContent(user_content=blocks, notes=notes, uploaded_files=uploaded)
+    return PreparedContent(
+        user_content=blocks,
+        notes=notes,
+        uploaded_files=uploaded,
+        # Sesión 06: solo sabemos el texto de los Word (los PDF los lee Anthropic).
+        attachment_chars=sum(len(text) for text in docx_texts.values()),
+    )
 
 
 async def stream_reply(

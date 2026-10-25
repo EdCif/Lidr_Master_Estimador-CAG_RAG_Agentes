@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.services.sessions import ProjectMetadata
+from app.services.turn_observer import TurnObservation
 
 
 class SessionCreateRequest(BaseModel):
@@ -71,4 +72,11 @@ class SessionState(BaseModel):
     uploaded_files: list[dict[str, str]] = Field(
         default_factory=list,
         description="Camino A: ficheros subidos a la Files API (nombre y file_id).",
+    )
+    # Sesión 06: la ficha técnica del último turno (la misma que llegó en el
+    # evento done o error). El runner del stress test la usa para comprobar
+    # que lo que vio en el streaming coincide con lo que guarda la sesión.
+    last_turn_observed: TurnObservation | None = Field(
+        default=None,
+        description="Observación del último turno (turn_observed): tokens, coste, latencia...",
     )
