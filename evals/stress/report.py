@@ -216,10 +216,11 @@ def latency_vs_tokens_data(rows: list[Row]) -> TableData:
 def cumulative_cost_data(rows: list[Row]) -> TableData:
     """Curva 2: lo que lleva gastado la conversación en cada turno (media de repeticiones).
 
-    Una columna por escenario sin PDF y con el PDF más grande: así se ve la
-    diferencia que hace el documento y el escalón cuando sale de la ventana.
+    Una columna por escenario sin PDF y con el PDF más grande que llegó a
+    funcionar (el de 400 KB se rechaza en el turno 1 y no dibuja curva): así se
+    ve la diferencia que hace el documento y el escalón cuando sale de la ventana.
     """
-    sizes = _sizes(rows)
+    sizes = _sizes(_done(rows))
     pairs = [(s, size) for s in _scenarios(rows) for size in sorted({sizes[0], sizes[-1]})]
     by_key: dict[tuple[str, int, int], list[float]] = defaultdict(list)
     for r in rows:

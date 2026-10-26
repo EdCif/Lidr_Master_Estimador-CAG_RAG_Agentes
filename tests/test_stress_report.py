@@ -61,6 +61,20 @@ async def test_render_tables_has_the_summary_the_three_curves_and_the_pdf_table(
     assert "| 5 KB | 1 | 100 % | 100 % | 100 % |" in tables
 
 
+async def test_cost_curve_skips_the_pdf_that_was_rejected(tmp_path):
+    """El de 400 KB se rechaza en el turno 1: la curva usa el mayor que funcionó."""
+    config = RunConfig(
+        scenarios=["contradiction"], sizes_kb=[0, 5, 400], repeats=1, turns=3, fake_llm=True,
+        retry_wait_s=(0.0,), output=tmp_path / "results.csv", fixtures_dir=tmp_path,
+    )
+    await main_async(config)
+    tables = render_tables(load_rows(config.output))
+
+    assert "Contradicción · 5 KB ($)" in tables
+    assert "Contradicción · 400 KB ($)" not in tables
+    assert "| Contradicción | 400 KB | 1 | 1 |" in tables  # en el resumen sí aparece, con su error
+
+
 async def test_update_report_keeps_the_handwritten_text(tmp_path, fake_rows):
     report = tmp_path / "REPORT.md"
     update_report(report, "tablas de la primera vez")

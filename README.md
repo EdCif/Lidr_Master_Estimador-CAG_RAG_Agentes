@@ -343,6 +343,155 @@ comprueba antes de extraer nada:
 En el Camino A el PDF lo abre Anthropic en sus servidores, con sus propios
 límites; los `.docx` se convierten a texto en local con los mismos topes.
 
+## Sesión 6 · Stress test del CAG: medir dónde rompe
+
+Hasta la sesión 5 el estimador es un sistema **CAG**: en cada turno viaja todo
+el contexto (system prompt con la memoria, los últimos turnos, la
+transcripción y el texto de los adjuntos). Funciona con conversaciones cortas
+y documentos modestos, pero nunca lo habíamos puesto a prueba. En esta sesión
+lo **instrumentamos** y lo sometemos a **conversaciones largas y PDF cada vez
+más grandes** para ver, con números, dónde empieza a fallar: latencia, coste
+o memoria.
+
+### Resumen de la entrega
+
+| | |
+| --- | --- |
+| **El entregable** | [evals/stress/REPORT.md](evals/stress/REPORT.md): tabla resumen, las tres curvas y dos párrafos de lectura. [evals/stress/results.csv](evals/stress/results.csv): una fila por turno (42 columnas). Al lado, [results.xlsx](evals/stress/results.xlsx), la misma información explicada para leerla en Excel. |
+| **Qué se mide** | 3 conversaciones sintéticas de 20 turnos (un proyecto que **crece**, uno que **cambia de rumbo** y uno que **se contradice**) × PDF de 0, 5, 20, 50 y 100 KB en el primer turno (y 400 KB, por encima del límite) × 3 repeticiones. Con **Claude Haiku 5.5** en toda la batería: un solo modelo, para que las curvas se puedan comparar. |
+| **Cómo se reproduce** | API con Haiku (`arrancar_todo.bat`, o `$env:SESSION_LLM_MODEL='claude-haiku-5-5'` antes de `uvicorn`) y, en otra terminal, el runner y el informe (ver [Cómo se lanza](#cómo-se-lanza)). La batería completa (48 conversaciones, 909 turnos) costó 7,40 $ y tarda unas 2 horas y media con 3 conversaciones a la vez. Sin coste y en segundos, con el modelo de prueba: `--fake-llm`. |
+| **Tests** | `uv run python -m pytest tests -v`: 206 tests, sin claves ni red. Los de esta sesión, en `tests/test_turn_observer.py`, `test_model_costs.py` y `test_stress_*.py`. |
+
+### Resultados en una mirada
+
+Las tablas completas y la lectura están en
+[evals/stress/REPORT.md](evals/stress/REPORT.md). Lo esencial:
+
+- **Lo primero que se rompe es la latencia.** Sin PDF, los turnos 1 a 3
+  caben en el presupuesto de 20 s (unos 18 s); desde el turno 4 la mediana
+  pasa de 25 s y en el turno 19 llega a 52 s. La causa no es el contexto sino
+  la respuesta: el estimador reescribe la estimación entera en cada turno y
+  la salida crece de 4.100 a 10.600 tokens (correlación con la latencia:
+  0,985).
+- **El coste no rompe con Haiku:** el turno más caro costó 0,020 $ (presupuesto:
+  0,03 $) y una conversación de 20 turnos, entre 0,10 y 0,24 $. Con Opus 5.5,
+  40 veces más caro por token, se rompería en el turno 1. El PDF de 100 KB
+  triplica el coste del turno 1 y deja de pagarse en el turno 7, cuando sale
+  de la ventana.
+- **La memoria falla en silencio.** Lo que no está en la ficha se olvida cuando
+  su turno sale de la ventana («reservas de más de cuatro horas»: del 100 % al
+  13 %). Lo que sí está no sale nunca: React sigue en la memoria tras
+  descartarlo y vuelve en el 87 % de las recapitulaciones del turno 20.
+- **El PDF no se pierde en el medio** hasta 100 KB (los tres datos, en el 100 %
+  de las respuestas del turno 1). El límite duro son los 300.000 caracteres:
+  el de 400 KB se rechaza en menos de un segundo, con un error claro.
+
+### Una observación por turno: `turn_observed`
+
+Cada llamada a `POST /sessions/{id}/estimate` deja **un único evento** con todo
+lo que importa del turno, en vez de logs sueltos repartidos por el código: así
+cada turno es una fila y se puede volcar a un CSV de una pasada, sin casar
+líneas por la hora. Lo construye
+[app/services/turn_observer.py](app/services/turn_observer.py) al terminar el
+turno (también si acaba en error) y sale por tres sitios:
+
+* una línea JSON en la consola de la API, con **structlog**:
+  `{"event": "turn_observed", "turn_index": 3, ...}`;
+* el evento SSE final (`done` o `error`) lleva `turn_observed`;
+* `GET /sessions/{id}` la devuelve como `last_turn_observed`.
+
+El runner la lee **de la respuesta**, no de la consola. Con varias
+conversaciones a la vez, leer la consola obligaría a emparejar cada línea con
+su sesión y a ser dueños del proceso de la API; en la respuesta, cada
+observación llega con su propia petición.
+
+Nuestro proyecto no tiene algunas piezas que el enunciado da por hechas
+(resumen acumulado, caché, elección de modelo por niveles). No se inventan:
+esos campos llevan un valor fijo que lo dice.
+
+| Campo | Qué vale aquí |
+| --- | --- |
+| `turn_index` | Número del turno en la sesión (cuenta también los que la ventana ya descartó) |
+| `session_id` | La sesión |
+| `enriched_transcript_chars` | Caracteres de la transcripción más el texto de los adjuntos |
+| `attachments_total_chars` | Texto de los adjuntos (0 si no hay; en el Camino A solo cuentan los Word) |
+| `messages_in_window` | Mensajes del historial tras aplicar la ventana (como mucho 12) |
+| `anchors_count` | Hechos guardados en la memoria `project_metadata`: nuestras «anclas» |
+| `summary_chars` | **0**: no hay resumen acumulado (lo que ocupa la memoria va en `metadata_chars`) |
+| `tokens_in` / `tokens_out` | Los que da el proveedor; la salida incluye el razonamiento interno |
+| `cost_usd` | Calculado con la tabla de [app/services/model_costs.py](app/services/model_costs.py); vacío (nunca 0) si falta el dato |
+| `latency_ms` | Duración del turno en la API, sin contar la red |
+| `cache_hit_kind` | **`none`**: no hay caché de respuestas |
+| `last_resolved_tier` | **`fixed:<modelo>`**: el modelo no cambia según la petición |
+
+Extras para leer mejor las curvas: `ttft_ms` (hasta el primer trozo de texto:
+lo que tarda el modelo en «leer»), `llm_ms`, `reply_chars`, `metadata_chars`,
+`turns_dropped`, `messages_sent`, `outcome` y `tokens_source`.
+
+### Las piezas del stress test
+
+Todo está en [evals/stress/](evals/stress/):
+
+| Fichero | Qué hace |
+| --- | --- |
+| [scenarios.py](evals/stress/scenarios.py) | Los tres guiones de 20 turnos sobre el mismo proyecto. Cada turno declara los hechos que los siguientes deberían recordar (o haber olvidado, tras un cambio de rumbo): es la «hoja de corrección». Las frases usan las que entiende el extractor de memoria de la sesión 5 |
+| [fixtures/build_pdfs.py](evals/stress/fixtures/build_pdfs.py) | Fabrica PDF de 5 a 100 KB de texto (±3 %), siempre iguales, con tres requisitos escondidos al principio, en medio y al final (SAP, migración de 12.000 reservas, ISO 27001). No se suben al repositorio: el runner los regenera |
+| [metrics.py](evals/stress/metrics.py) | `LatencyBudgetMetric` (20 s por turno), `CostBudgetMetric` (3 céntimos por turno) y `MemoryDriftMetric` (¿sigue vivo un hecho en la memoria, el historial o la respuesta?), con el patrón `MetricResult(name, score, passed, details)`. Binarias y deterministas: coincidencia exacta, sin LLM como juez |
+| [run.py](evals/stress/run.py) | El runner: crea una sesión por conversación, manda los turnos, recoge `turn_observed` y la foto de la sesión, pasa las métricas y escribe el CSV fila a fila. Reintenta los fallos pasajeros y continúa una batería cortada con `--resume` |
+| [report.py](evals/stress/report.py) | Calcula las tablas de `REPORT.md` a partir del CSV (P50/P95, curvas por tramos) y las coloca entre dos marcas; la lectura se escribe a mano y no se toca al regenerar |
+| [to_excel.py](evals/stress/to_excel.py) | `results.xlsx`: hojas «Resumen», «Turnos», «Leyenda» y «Hoja de corrección», en castellano |
+| [fake_llm.py](evals/stress/fake_llm.py) | Un modelo de prueba previsible para comprobar toda la cadena gratis |
+
+Las métricas van en un módulo propio, junto al stress test, y no en un
+`evals/metrics.py` general: leen la observación del turno y la foto de la
+sesión, no una estimación suelta, y dependen de la forma de esos datos.
+
+Los presupuestos son una decisión: **3 céntimos por turno** es la cifra de
+«desplegable» de la lección de calidad del dato; **20 s** porque nuestra
+respuesta es una estimación completa (el ejemplo de 4 s del enunciado no lo
+cumpliría ningún turno). Se cambian con `--budget-ms` y `--budget-usd`.
+
+### Cómo se lanza
+
+Desde la carpeta `estimador-cag`:
+
+```powershell
+# Comprobar toda la cadena, gratis y en segundos (modelo de prueba):
+uv run python -m evals.stress.run --fake-llm --repeats 1 --output planes/prueba.csv
+
+# La batería real: la API con Haiku en una terminal...
+$env:SESSION_LLM_MODEL='claude-haiku-5-5'
+uv run uvicorn app.main:app --host 127.0.0.1 --port 8001
+
+# ...y en otra, el runner y las tablas del informe:
+uv run python -m evals.stress.run --http http://127.0.0.1:8001 `
+    --attachment-sizes 0,5,20,50,100,400 --repeats 3 --concurrency 3 --output evals/stress/results.csv
+uv run python -m evals.stress.report
+```
+
+Si la batería se corta, el mismo comando con `--resume` conserva las
+conversaciones completas y repite solo las que quedaron a medias. En Windows,
+`arrancar_todo.bat` arranca la API (con Haiku) y Streamlit con un doble clic.
+
+### Diferencias con el punto de partida del enunciado
+
+* No hay resumen acumulado, caché de respuestas ni elección de modelo por
+  niveles: `summary_chars`, `cache_hit_kind` y `last_resolved_tier` llevan
+  valores fijos que lo dicen, y las columnas de caché del informe valen 0 %.
+* No había un framework `evals/` previo ni un `EstimationService`: el evento
+  se agrega en `conversation_service.stream_estimation_turn`, que es el sitio
+  equivalente, y las métricas siguen el patrón `MetricResult` que pide el
+  enunciado.
+* `MAX_ATTACHMENT_CHARS` vale 300.000 y pasarse **no recorta en silencio**:
+  da un error claro. Por eso, para ver ese límite, la batería añade un PDF de
+  400 KB, que falla siempre a propósito («fallar duro» frente a «degradar en
+  silencio»).
+* `structlog` se ha añadido en esta sesión, solo para este evento.
+
+En la interfaz Streamlit, el panel lateral enseña ahora la ficha del último
+turno («Última llamada») y un apartado **«⚖️ Evaluadores»** que aplica estas
+mismas métricas a la conversación en curso.
+
 ## Arquitectura y capa de responsabilidades
 
 ```text
@@ -367,6 +516,8 @@ estimador-cag/
 │   │   ├── prompt_builder.py    # Sesión 5: rellena la plantilla con la memoria
 │   │   ├── metadata_extractor.py    # Sesión 5: extractor heurístico de project_metadata
 │   │   ├── conversation_service.py  # Sesión 5: un turno completo, de los adjuntos a la memoria
+│   │   ├── turn_observer.py     # Sesión 6: el evento turn_observed (13 campos) y su registro con structlog
+│   │   ├── model_costs.py       # Sesión 6: precios por modelo y coste de cada turno
 │   │   └── attachments/
 │   │       ├── common.py            # Validación y límites de PDF y Word
 │   │       ├── path_a_files_api.py  # Camino A: Files API de Anthropic
@@ -387,9 +538,14 @@ estimador-cag/
 ├── docs/
 │   ├── transcripcion_reunion.md
 │   └── ejemplos/                # Sesión 5: PDF y Word ficticios para probar los adjuntos
+├── evals/stress/                # Sesión 6: stress test (guiones, PDF, métricas, runner, informe)
+│   ├── REPORT.md                # El informe: tablas y lectura
+│   ├── results.csv              # Una fila por turno de la batería
+│   └── results.xlsx             # Lo mismo, en Excel y explicado
 ├── scripts/validate_pipeline.py
 ├── tests/
 ├── streamlit_app.py             # Interfaz Streamlit (sesión 5: cliente de la API de sesiones)
+├── arrancar_todo.bat            # Windows: API + Streamlit con un doble clic
 ├── .streamlit/config.toml       # Tema de la interfaz Streamlit (colores y letra)
 ├── .github/workflows/validate.yml
 ├── .env.example
@@ -421,8 +577,8 @@ Los ejemplos permanecen en el repositorio y se añaden a cada petición.
 | `PATCH /api/v1/ideas/{id}` | Actualizar título, descripción, texto, notas o estado |
 | `POST /api/v1/ideas/{id}/estimate` | Generar y guardar una nueva versión |
 | `POST /sessions` | Sesión 5: crear una conversación; devuelve `session_id`. Con `{"inherit_from": "<id>"}` hereda la memoria de otra sesión |
-| `GET /sessions/{id}` | Sesión 5: ver la memoria (`project_metadata`), el historial y cuándo caduca (`expires_at`). `410` si ha caducado |
-| `POST /sessions/{id}/estimate` | Sesión 5: estimar con transcripción y adjuntos (multipart); respuesta en streaming SSE. `410` si ha caducado |
+| `GET /sessions/{id}` | Sesión 5: ver la memoria (`project_metadata`), el historial y cuándo caduca (`expires_at`). `410` si ha caducado. Sesión 6: también `last_turn_observed` |
+| `POST /sessions/{id}/estimate` | Sesión 5: estimar con transcripción y adjuntos (multipart); respuesta en streaming SSE. `410` si ha caducado. Sesión 6: el evento `done` (y el `error`, con `retryable`) lleva `turn_observed` |
 
 Petición mínima para el endpoint original:
 
@@ -475,6 +631,16 @@ ventana del historial) y solo el modelo es falso (`FakeLLM`, en
 El resto (unitarios de sesiones, plantilla, extractor, adjuntos y endpoints)
 están escritos con `unittest`; pytest los ejecuta igual.
 
+Los de la **sesión 6**, también sin claves ni red:
+
+| Fichero | Qué comprueba |
+| --- | --- |
+| `test_model_costs.py`, `test_turn_observer.py` | Precios y tramos; el cronómetro del turno; los 13 campos; una sola línea JSON por turno |
+| `test_stress_metrics.py` | Cada métrica: un caso que pasa, uno que falla y casos límite |
+| `test_stress_scenarios.py` | Guiones bien formados; el extractor reconoce cada hecho; previsión de la memoria sin modelo |
+| `test_build_pdfs.py` | Tamaño de los PDF, datos legibles y en su sitio, y el de 400 KB rechazado |
+| `test_stress_runner.py`, `test_stress_report.py`, `test_stress_excel.py` | La batería completa con el modelo de prueba: CSV, deriva turno a turno, `--resume`, tablas del informe y Excel |
+
 ## Pipeline automático de validación
 
 ### Sin credenciales ni consumo de API
@@ -522,7 +688,7 @@ Markdown puede reflejar información del texto utilizado.
 | `APP_DEBUG` | Modo de depuración de la aplicación |
 | `DATA_DIR` | Carpeta de la base de datos; por defecto, `data/` en el proyecto |
 | `ANTHROPIC_API_KEY` | Clave de Anthropic: Streamlit (sesión 2) y endpoints `/sessions` (sesión 5) |
-| `SESSION_LLM_MODEL` | Modelo de las sesiones; por defecto `claude-opus-5-5` |
+| `SESSION_LLM_MODEL` | Modelo de las sesiones; por defecto `claude-opus-5-5`. La batería de la sesión 6 usa `claude-haiku-5-5` |
 | `SESSION_LLM_EFFORT` | Esfuerzo de razonamiento de Opus 5.5: `low`, `medium` (defecto), `high`... |
 | `SESSION_MAX_TOKENS` | Techo de tokens de salida de cada respuesta, razonamiento incluido (64000) |
 | `MAX_TURNS` | Ventana del historial: turnos (pregunta + respuesta) que viajan en cada llamada, contando la pregunta nueva (6). La memoria `project_metadata` no se recorta |
