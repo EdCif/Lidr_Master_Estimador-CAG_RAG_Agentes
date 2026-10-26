@@ -31,3 +31,7 @@ dist/
 # Datos locales e informes generados por el pipeline.
 data/
 artifacts/
+
+# Sesión 6 - Los PDF del stress test se generan solos (evals/stress/fixtures/
+# build_pdfs.py) y salen siempre iguales: no se suben, como pide el ejercicio.
+evals/stress/fixtures/*.pdf
