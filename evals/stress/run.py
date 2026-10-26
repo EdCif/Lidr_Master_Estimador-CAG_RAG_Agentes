@@ -476,7 +476,25 @@ async def main_async(config: RunConfig) -> int:
     simulated = " (simulado: no se ha gastado nada)" if config.fake_llm else ""
     print(f"Listo: {sink.rows} filas, {total_errors} turnos con error, {total_cost:.4f} $ en total{simulated}, "
           f"{(time.perf_counter() - started) / 60:.1f} min. CSV: {config.output}")
+    _write_excel_next_to(config.output)
     return 0
+
+
+def _write_excel_next_to(csv_path: Path) -> None:
+    """Deja al lado del CSV su versión legible en Excel (ver to_excel.py).
+
+    Es una ayuda para revisar los resultados: si falta openpyxl o algo sale
+    mal, se avisa y la batería no se da por fallida (el CSV ya está escrito).
+    """
+    try:
+        from evals.stress.to_excel import write_excel
+    except ImportError:
+        print("Excel no generado: falta openpyxl (uv add openpyxl).")
+        return
+    try:
+        print(f"Excel: {write_excel(csv_path)}")
+    except Exception as error:  # el CSV es lo importante; el Excel, una ayuda
+        print(f"Excel no generado: {error!r}")
 
 
 def _int_list(text: str) -> list[int]:

@@ -6,6 +6,7 @@
 *.docx binary
 *.png binary
 *.gif binary
+*.xlsx binary
 
 # Los .bat de Windows necesitan saltos de línea CRLF: con LF, cmd se lía con
 # las etiquetas (:esperar_api) y los "goto". Así llegan bien a cualquier equipo.
