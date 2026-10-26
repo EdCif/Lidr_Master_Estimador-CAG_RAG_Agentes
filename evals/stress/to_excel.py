@@ -4,8 +4,12 @@ Para qué sirve
 --------------
 El CSV del stress test es para programas: 42 columnas con nombres técnicos,
 comas como separador (Excel en español espera punto y coma) y 1/0 en vez de
-sí/no. Este módulo hace una versión para personas, con tres hojas:
+sí/no. Este módulo hace una versión para personas, con cuatro hojas:
 
+* **Resumen**: las conclusiones. Las mismas cinco tablas que el informe
+  (``REPORT.md``): el resumen por escenario y tamaño de PDF, las tres curvas
+  y los datos del PDF por posición, cada una con una línea de "cómo leerla".
+  Las calcula ``report.py``, así que Excel e informe dicen lo mismo.
 * **Turnos**: una fila por turno con las columnas importantes, en castellano,
   ✅/❌, segundos en vez de milisegundos, filtros y las filas con error en
   rojo. Dos columnas cuentan QUÉ se ha olvidado (de la conversación y del
@@ -36,6 +40,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from evals.stress.fixtures.build_pdfs import PLANTED_FACTS
+from evals.stress.report import SECTIONS, data_line
 from evals.stress.scenarios import SCENARIOS, TURNS_PER_SCENARIO, Fact
 
 SCENARIO_NAMES = {"growing": "Crece", "pivot": "Cambio de rumbo", "contradiction": "Contradicción"}
@@ -47,6 +52,8 @@ _HEADER_FILL = PatternFill("solid", fgColor="8C6D46")
 _HEADER_FONT = Font(bold=True, color="FFFFFF")
 _ERROR_FILL = PatternFill("solid", fgColor="F8D7DA")
 _TITLE_FONT = Font(bold=True, size=13)
+_BIG_TITLE_FONT = Font(bold=True, size=15)
+_HOW_TO_FONT = Font(italic=True, color="5A4A32")
 _WRAP = Alignment(wrap_text=True, vertical="top")
 
 # Etiqueta del hecho -> el hecho, por escenario (para decir qué se olvidó).
@@ -206,9 +213,54 @@ def _header(sheet, titles: list[str], widths: list[int]) -> None:
     sheet.freeze_panes = "A2"
 
 
-def _turns_sheet(workbook: Workbook, rows: list[dict[str, str]]) -> None:
+def _summary_sheet(workbook: Workbook, rows: list[dict[str, str]]) -> None:
+    """La primera hoja: de dónde salen los datos y las cinco tablas del informe."""
     sheet = workbook.active
-    sheet.title = "Turnos"
+    sheet.title = "Resumen"
+    width = max(len(section.data(rows).headers) for section in SECTIONS)
+
+    def text_row(value: str, font: Font, height: int | None = None) -> None:
+        """Una fila de texto que ocupa todo el ancho de las tablas."""
+        sheet.append([value])
+        row = sheet.max_row
+        sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=width)
+        cell = sheet.cell(row=row, column=1)
+        cell.font, cell.alignment = font, _WRAP
+        if height:
+            sheet.row_dimensions[row].height = height
+
+    text_row("Stress test del CAG · ¿dónde empieza a romperse?", _BIG_TITLE_FONT, 22)
+    text_row(data_line(rows), Font(color="5A4A32"))
+    text_row(
+        "Cómo usar este Excel: esta hoja resume los resultados. «Turnos» tiene el detalle de cada "
+        "turno, «Leyenda» explica sus columnas y «Hoja de corrección» dice qué se comprueba en "
+        "cada turno.",
+        Font(), 32,
+    )
+    for section in SECTIONS:
+        table = section.data(rows)
+        sheet.append([])
+        text_row(section.title, _TITLE_FONT, 20)
+        text_row(f"Cómo leerla: {section.how_to_read}", _HOW_TO_FONT, 32)
+        sheet.append(table.headers)
+        for cell in sheet[sheet.max_row]:
+            cell.fill, cell.font = _HEADER_FILL, _HEADER_FONT
+            cell.alignment = Alignment(wrap_text=True, vertical="center")
+        sheet.row_dimensions[sheet.max_row].height = 32
+        for values in table.rows:
+            sheet.append(values)
+            for index, cell in enumerate(sheet[sheet.max_row], start=1):
+                if index > table.align_right_from - 1 and index > 1:
+                    cell.alignment = Alignment(horizontal="right")
+        if section.note:
+            text_row(section.note, _HOW_TO_FONT)
+    sheet.column_dimensions["A"].width = 24
+    for index in range(2, width + 1):
+        sheet.column_dimensions[get_column_letter(index)].width = 17
+
+
+def _turns_sheet(workbook: Workbook, rows: list[dict[str, str]]) -> None:
+    sheet = workbook.create_sheet("Turnos")
     _header(sheet, [column.title for column in COLUMNS], [column.width for column in COLUMNS])
     for row in rows:
         sheet.append([column.value(row) for column in COLUMNS])
@@ -284,6 +336,7 @@ def write_excel(csv_path: Path, xlsx_path: Path | None = None) -> Path:
     rows.sort(key=lambda r: (r["scenario"], int(r["attachment_kb"]), int(r["repeat"]), int(r["turn_index"])))
 
     workbook = Workbook()
+    _summary_sheet(workbook, rows)
     _turns_sheet(workbook, rows)
     _legend_sheet(workbook)
     _answer_key_sheet(workbook)

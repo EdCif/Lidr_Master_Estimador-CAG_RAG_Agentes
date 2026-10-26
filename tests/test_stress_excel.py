@@ -38,7 +38,7 @@ async def test_runner_leaves_a_readable_excel_next_to_the_csv(tmp_path):
     assert xlsx_path.is_file()
 
     workbook = load_workbook(xlsx_path)
-    assert workbook.sheetnames == ["Turnos", "Leyenda", "Hoja de corrección"]
+    assert workbook.sheetnames == ["Resumen", "Turnos", "Leyenda", "Hoja de corrección"]
     headers, rows = turns_by_key(workbook)
     assert headers == [column.title for column in COLUMNS]
     assert len(rows) == 2 * 2 * 14  # 2 escenarios × 2 tamaños × 14 turnos
@@ -54,6 +54,23 @@ async def test_runner_leaves_a_readable_excel_next_to_the_csv(tmp_path):
     assert rows[("Contradicción", 5, 2)]["Datos del PDF en la respuesta"] == "❌ ninguno"
     assert rows[("Contradicción", 0, 1)]["Datos del PDF en la respuesta"] == "sin PDF"
     assert rows[("Contradicción", 0, 1)]["Resultado"] == "✅"
+
+
+async def test_summary_sheet_has_the_report_tables_with_how_to_read_them(tmp_path):
+    """La primera hoja trae las mismas tablas que REPORT.md, cada una explicada."""
+    from evals.stress.report import SECTIONS
+
+    csv_path = await run_fake_battery(tmp_path)
+    sheet = load_workbook(csv_path.with_suffix(".xlsx"))["Resumen"]
+    texts = [row[0] for row in sheet.iter_rows(values_only=True) if row and row[0]]
+
+    for section in SECTIONS:
+        assert section.title in texts
+        assert f"Cómo leerla: {section.how_to_read}" in texts
+    assert any(text.startswith("Datos: 56 turnos (0 con error)") for text in texts)
+    # La fila de la contradicción sin PDF del resumen, como en el informe.
+    rows = [list(row) for row in sheet.iter_rows(values_only=True)]
+    assert any(row[:4] == ["Contradicción", "sin PDF", "14", "0"] for row in rows)
 
 
 async def test_legend_explains_every_column_and_the_answer_key_lists_the_scripts(tmp_path):

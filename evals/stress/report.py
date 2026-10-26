@@ -37,7 +37,8 @@ import argparse
 import csv
 import statistics
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -140,8 +141,23 @@ def _conversation_costs(rows: list[Row]) -> list[float]:
 # ---------------------------------------------------------------------------
 # 2. Las tablas
 # ---------------------------------------------------------------------------
+# Cada tabla se calcula una sola vez (``TableData``) y después se escribe en
+# Markdown (REPORT.md) o en Excel (hoja «Resumen» de to_excel.py). Así el
+# informe y el Excel dicen exactamente lo mismo.
 
-def summary_table(rows: list[Row]) -> str:
+@dataclass(frozen=True)
+class TableData:
+    """Una tabla ya calculada: títulos de las columnas y filas, todo como texto."""
+
+    headers: list[str]
+    rows: list[list[str]]
+    align_right_from: int = 1
+
+    def markdown(self) -> str:
+        return _table(self.headers, self.rows, self.align_right_from)
+
+
+def summary_data(rows: list[Row]) -> TableData:
     """Una fila por escenario × tamaño de PDF."""
     table = []
     for scenario in _scenarios(rows):
@@ -168,16 +184,13 @@ def summary_table(rows: list[Row]) -> str:
                 pct(_mean(drift)),
                 "—" if size == 0 else pct(_mean(first_pdf)),
             ])
-    return _table(
-        ["Escenario", "PDF", "Turnos", "Con error", "Latencia P50", "Latencia P95",
-         "Coste medio por conversación", "Caché exacta", "Caché semántica",
-         "Recuerdo medio (hoja de corrección)", "Datos del PDF en el turno 1"],
-        table,
-        align_right_from=2,
-    )
+    headers = ["Escenario", "PDF", "Turnos", "Con error", "Latencia P50", "Latencia P95",
+               "Coste medio por conversación", "Caché exacta", "Caché semántica",
+               "Recuerdo medio (hoja de corrección)", "Datos del PDF en el turno 1"]
+    return TableData(headers, table, align_right_from=2)
 
 
-def latency_vs_tokens_table(rows: list[Row]) -> str:
+def latency_vs_tokens_data(rows: list[Row]) -> TableData:
     """Curva 1: cuánto tarda según lo que le mandamos (tokens de entrada)."""
     done = [r for r in _done(rows) if r["tokens_in"]]
     table = []
@@ -195,14 +208,12 @@ def latency_vs_tokens_table(rows: list[Row]) -> str:
             fmt(percentile(_seconds(group, "latency_ms"), 95), 1, " s"),
             fmt(_mean(float(r["tokens_out"]) for r in group if r["tokens_out"]), 0),
         ])
-    return _table(
-        ["Tokens de entrada", "Turnos", "Primer texto P50", "Latencia P50", "Latencia P95",
-         "Tokens de salida (media)"],
-        table,
-    )
+    headers = ["Tokens de entrada", "Turnos", "Primer texto P50", "Latencia P50", "Latencia P95",
+               "Tokens de salida (media)"]
+    return TableData(headers, table)
 
 
-def cumulative_cost_table(rows: list[Row]) -> str:
+def cumulative_cost_data(rows: list[Row]) -> TableData:
     """Curva 2: lo que lleva gastado la conversación en cada turno (media de repeticiones).
 
     Una columna por escenario sin PDF y con el PDF más grande: así se ve la
@@ -222,10 +233,10 @@ def cumulative_cost_table(rows: list[Row]) -> str:
     headers = ["Turno"] + [
         f"{SCENARIO_NAMES.get(s, s)} · {'sin PDF' if size == 0 else f'{size} KB'} ($)" for s, size in pairs
     ]
-    return _table(headers, table)
+    return TableData(headers, table)
 
 
-def drift_vs_n_table(rows: list[Row]) -> str:
+def drift_vs_n_data(rows: list[Row]) -> TableData:
     """Curva 3: qué parte de lo que debía recordar sigue viva tras el turno N."""
     scenarios = _scenarios(rows)
     table = []
@@ -240,10 +251,10 @@ def drift_vs_n_table(rows: list[Row]) -> str:
             checked = round(_mean(int(r["memory_drift_checked"]) for r in group))
             cells.append(f"{pct(_mean(float(r['memory_drift_score']) for r in group))} ({checked} datos)")
         table.append(cells)
-    return _table(["Turno N"] + [SCENARIO_NAMES.get(s, s) for s in scenarios], table)
+    return TableData(["Turno N"] + [SCENARIO_NAMES.get(s, s) for s in scenarios], table)
 
 
-def pdf_recall_table(rows: list[Row]) -> str:
+def pdf_recall_data(rows: list[Row]) -> TableData:
     """Los tres datos del PDF en la respuesta del turno 1, por tamaño y posición."""
     first = [r for r in _done(rows) if r["turn_index"] == "1" and r["attachment_recall_details"]]
     table = []
@@ -256,35 +267,75 @@ def pdf_recall_table(rows: list[Row]) -> str:
             hits = [f"{fact.label}=1" in r["attachment_recall_details"].split(";") for r in group]
             cells.append(pct(sum(hits) / len(hits)))
         table.append(cells)
-    return _table(
-        ["PDF", "Conversaciones"] + [f"«{f.fact}» ({f.position})" for f in PLANTED_FACTS],
-        table,
-    )
+    headers = ["PDF", "Conversaciones"] + [f"«{f.fact}» ({f.position})" for f in PLANTED_FACTS]
+    return TableData(headers, table)
 
 
-def render_tables(rows: list[Row]) -> str:
-    """Todas las tablas, con una línea que dice de dónde salen los datos."""
+@dataclass(frozen=True)
+class Section:
+    """Una tabla del informe: título, cómo leerla, cómo se calcula y una nota final."""
+
+    title: str
+    how_to_read: str
+    data: Callable[[list[Row]], TableData]
+    note: str = ""
+
+
+SECTIONS = (
+    Section(
+        "1. Resumen por escenario y tamaño de PDF",
+        "una fila por tipo de conversación. Lo importante: la latencia P95 (el peor caso "
+        "habitual), el coste de una conversación entera y el recuerdo medio.",
+        summary_data,
+        "No hay caché de respuestas en este proyecto: las dos columnas de caché valen 0 % por diseño.",
+    ),
+    Section(
+        "2. Curva 1 · Latencia frente a tokens de entrada",
+        "¿tarda más cuanto más le mandamos? Mira «Primer texto»: es lo que tarda el modelo en "
+        "leer antes de empezar a escribir. La latencia total depende sobre todo de lo larga "
+        "que sea la respuesta.",
+        latency_vs_tokens_data,
+    ),
+    Section(
+        "3. Curva 2 · Coste acumulado por turno (media de las repeticiones)",
+        "lo gastado hasta cada turno. Con PDF, el coste sube deprisa mientras el documento "
+        "viaja en cada llamada (turnos 1 a 6) y se frena cuando sale de la ventana (turno 7).",
+        cumulative_cost_data,
+    ),
+    Section(
+        "4. Curva 3 · Recuerdo de la hoja de corrección tras el turno N",
+        "qué parte de lo dicho en turnos anteriores sigue viva. Si baja cuando N crece, el "
+        "sistema olvida sin avisar: es la degradación silenciosa.",
+        drift_vs_n_data,
+        "Media de las comprobaciones de ese turno (datos dichos antes de N). En el turno 1 no "
+        "hay nada anterior que comprobar.",
+    ),
+    Section(
+        "5. Datos del PDF en la respuesta del turno 1, por posición en el documento",
+        "¿usa el modelo los tres datos escondidos en el PDF? Si con los PDF grandes falla el "
+        "del medio y no los de los extremos, es el efecto «lost in the middle».",
+        pdf_recall_data,
+    ),
+)
+
+
+def data_line(rows: list[Row]) -> str:
+    """De dónde salen los datos: turnos, errores, modelo, ejecución y fecha."""
     models = sorted({r["model"] for r in rows if r.get("model")})
     run_ids = sorted({r["run_id"] for r in rows})
     errors = len(rows) - len(_done(rows))
     generated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    parts = [
-        f"_Datos: {fmt(len(rows), 0)} turnos ({fmt(errors, 0)} con error) · modelo "
-        f"{', '.join(models) or '—'} · ejecución {', '.join(run_ids)} · tablas generadas el {generated}._",
-        "### 1. Resumen por escenario y tamaño de PDF",
-        summary_table(rows),
-        "_No hay caché de respuestas en este proyecto: las dos columnas de caché valen 0 % por diseño._",
-        "### 2. Curva 1 · Latencia frente a tokens de entrada",
-        latency_vs_tokens_table(rows),
-        "### 3. Curva 2 · Coste acumulado por turno (media de las repeticiones)",
-        cumulative_cost_table(rows),
-        "### 4. Curva 3 · Recuerdo de la hoja de corrección tras el turno N",
-        drift_vs_n_table(rows),
-        "_Media de las comprobaciones de ese turno (datos dichos antes de N). En el turno 1 no hay "
-        "nada anterior que comprobar._",
-        "### 5. Datos del PDF en la respuesta del turno 1, por posición en el documento",
-        pdf_recall_table(rows),
-    ]
+    return (f"Datos: {fmt(len(rows), 0)} turnos ({fmt(errors, 0)} con error) · modelo "
+            f"{', '.join(models) or '—'} · ejecución {', '.join(run_ids)} · generado el {generated}.")
+
+
+def render_tables(rows: list[Row]) -> str:
+    """Todas las tablas en Markdown, cada una con su «cómo leerla»."""
+    parts = [f"_{data_line(rows)}_"]
+    for section in SECTIONS:
+        parts += [f"### {section.title}", f"_Cómo leerla: {section.how_to_read}_", section.data(rows).markdown()]
+        if section.note:
+            parts.append(f"_{section.note}_")
     return "\n\n".join(parts)
 
 

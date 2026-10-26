@@ -494,6 +494,10 @@ def _write_excel_next_to(csv_path: Path) -> None:
         return
     try:
         print(f"Excel: {write_excel(csv_path)}")
+    except PermissionError:
+        # Lo más habitual: el Excel anterior está abierto y Windows lo bloquea.
+        print(f"Excel no generado: {csv_path.with_suffix('.xlsx')} está abierto en Excel. Ciérralo y lanza:")
+        print(f"  uv run python -m evals.stress.to_excel --csv {csv_path}")
     except Exception as error:  # el CSV es lo importante; el Excel, una ayuda
         print(f"Excel no generado: {error!r}")
 
