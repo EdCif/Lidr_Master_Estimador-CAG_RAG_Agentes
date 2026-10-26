@@ -156,3 +156,31 @@ def test_command_line_defaults_follow_the_exercise():
     assert (config.repeats, config.turns) == (3, 20)
     with pytest.raises(SystemExit):
         parse_args(["--repeats", "1"])  # hay que elegir --http, --in-process o --fake-llm
+
+
+async def test_resume_keeps_finished_conversations_and_redoes_the_unfinished_one(tmp_path):
+    """Si la batería se corta, --resume conserva lo completo y repite lo que quedó a medias."""
+    config = fake_config(tmp_path, sizes_kb=[0, 5], turns=4, concurrency=1)
+    await main_async(config)
+    rows = read_csv(config.output)
+    first_run = rows[0]["run_id"]
+
+    # Simulamos el corte: la conversación sin PDF entera y solo 2 turnos de la otra.
+    finished = [r for r in rows if r["attachment_kb"] == "0"]
+    unfinished = [r for r in rows if r["attachment_kb"] == "5"][:2]
+    with config.output.open("w", encoding="utf-8", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=FIELDNAMES)
+        writer.writeheader()
+        writer.writerows(finished + unfinished)
+
+    import asyncio
+    await asyncio.sleep(1.1)  # para que el identificador de la nueva ejecución sea otro
+    config.resume = True
+    await main_async(config)
+    rows = read_csv(config.output)
+
+    assert len(rows) == 8
+    assert {r["run_id"] for r in rows if r["attachment_kb"] == "0"} == {first_run}  # conservada
+    redone = [r for r in rows if r["attachment_kb"] == "5"]
+    assert sorted(int(r["turn_index"]) for r in redone) == [1, 2, 3, 4]  # repetida entera
+    assert {r["run_id"] for r in redone} != {first_run}

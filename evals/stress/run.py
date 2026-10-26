@@ -48,6 +48,10 @@ Uso, desde la carpeta estimador-cag:
 
 Robustez: el CSV se escribe y se guarda fila a fila (si la batería se corta,
 lo hecho no se pierde) y los fallos pasajeros del proveedor se reintentan.
+Si la batería se interrumpe (se cierra la terminal, se apaga el equipo...),
+``--resume`` la continúa: conserva las conversaciones ya completas y repite
+desde el principio las que quedaron a medias (sus sesiones vivían en la API
+y se han perdido). Sin ``--resume``, el CSV se escribe de cero.
 Un turno fallido no toca el historial de la sesión, así que repetirlo es
 seguro.
 """
@@ -129,6 +133,7 @@ class RunConfig:
     budget_usd: float = DEFAULT_COST_BUDGET_USD
     output: Path = DEFAULT_OUTPUT
     fixtures_dir: Path = FIXTURES_DIR
+    resume: bool = False
 
 
 @dataclass
@@ -267,14 +272,23 @@ def evaluate_turn(
 # ---------------------------------------------------------------------------
 
 class CsvSink:
-    """Escribe las filas del CSV y las guarda en disco una a una."""
+    """Escribe las filas del CSV y las guarda en disco una a una.
 
-    def __init__(self, path: Path) -> None:
+    Con ``keep`` (al continuar con --resume), el CSV se reescribe primero con
+    esas filas, las de las conversaciones ya completas, y las nuevas se añaden
+    detrás.
+    """
+
+    def __init__(self, path: Path, keep: list[dict[str, Any]] | None = None) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
         self._file = path.open("w", newline="", encoding="utf-8")
         self._writer = csv.DictWriter(self._file, fieldnames=FIELDNAMES, extrasaction="ignore")
         self._writer.writeheader()
+        for row in keep or []:
+            self._writer.writerow(row)
+        self._file.flush()
+        self.kept = len(keep or [])
         self.rows = 0
 
     def write(self, row: dict[str, Any]) -> None:
@@ -284,6 +298,34 @@ class CsvSink:
 
     def close(self) -> None:
         self._file.close()
+
+
+def completed_conversations(csv_path: Path, turns: int) -> tuple[set[tuple[str, int, int]], list[dict[str, Any]]]:
+    """Las conversaciones ya terminadas de un CSV anterior y sus filas.
+
+    Una conversación está terminada si llegó al último turno, o si se paró
+    a propósito en el turno 1 porque falló el adjunto (el PDF de 400 KB).
+    Las que quedaron a medias se descartan: hay que repetirlas enteras.
+    """
+    if not csv_path.is_file():
+        return set(), []
+    with csv_path.open(encoding="utf-8", newline="") as file:
+        rows = list(csv.DictReader(file))
+    by_conversation: dict[tuple[str, int, int], list[dict[str, Any]]] = {}
+    for row in rows:
+        key = (row["scenario"], int(row["attachment_kb"]), int(row["repeat"]))
+        by_conversation.setdefault(key, []).append(row)
+    done: set[tuple[str, int, int]] = set()
+    for key, conversation in by_conversation.items():
+        last_turn = max(int(row["turn_index"]) for row in conversation)
+        attachment_failed = (
+            key[1] > 0 and len(conversation) == 1
+            and conversation[0]["turn_index"] == "1" and conversation[0]["outcome"] == "error"
+        )
+        if last_turn >= turns or attachment_failed:
+            done.add(key)
+    kept = [row for row in rows if (row["scenario"], int(row["attachment_kb"]), int(row["repeat"])) in done]
+    return done, kept
 
 
 @dataclass
@@ -444,10 +486,17 @@ async def main_async(config: RunConfig) -> int:
             for repeat in range(1, config.repeats + 1)
         ]
         print(f"Stress test · {mode}")
+        kept_rows: list[dict[str, Any]] = []
+        if config.resume:
+            done, kept_rows = completed_conversations(config.output, config.turns)
+            pending = [c for c in combos if (c[0].name, c[1], c[2]) not in done]
+            print(f"Continuando: se conservan {len(done)} conversaciones ya completas "
+                  f"({len(kept_rows)} filas); quedan {len(pending)}.")
+            combos = pending
         print(f"{len(combos)} conversaciones × hasta {config.turns} turnos · "
               f"{config.concurrency} a la vez · CSV: {config.output}")
 
-        sink = CsvSink(config.output)
+        sink = CsvSink(config.output, keep=kept_rows)
         semaphore = asyncio.Semaphore(config.concurrency)
         done_count = 0
         started = time.perf_counter()
@@ -474,7 +523,9 @@ async def main_async(config: RunConfig) -> int:
     # Con el modelo falso el coste es de mentira: tokens inventados a precio de
     # Haiku. Lo decimos para que nadie crea que se ha gastado dinero.
     simulated = " (simulado: no se ha gastado nada)" if config.fake_llm else ""
-    print(f"Listo: {sink.rows} filas, {total_errors} turnos con error, {total_cost:.4f} $ en total{simulated}, "
+    kept = f" (+ {sink.kept} conservadas)" if sink.kept else ""
+    print(f"Listo: {sink.rows} filas nuevas{kept}, {total_errors} turnos con error, "
+          f"{total_cost:.4f} $ en esta ejecución{simulated}, "
           f"{(time.perf_counter() - started) / 60:.1f} min. CSV: {config.output}")
     _write_excel_next_to(config.output)
     print(f"Siguiente: las tablas del informe con  uv run python -m evals.stress.report --csv {config.output}")
@@ -525,6 +576,8 @@ def parse_args(argv: list[str] | None = None) -> RunConfig:
     parser.add_argument("--budget-usd", type=float, default=DEFAULT_COST_BUDGET_USD)
     parser.add_argument("--model", help="modelo para --in-process / --fake-llm (con --http lo decide la API)")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--resume", action="store_true",
+                        help="continuar una batería interrumpida: conserva las conversaciones completas del CSV")
     args = parser.parse_args(argv)
     return RunConfig(
         scenarios=args.scenarios.split(","),
@@ -541,6 +594,7 @@ def parse_args(argv: list[str] | None = None) -> RunConfig:
         budget_ms=args.budget_ms,
         budget_usd=args.budget_usd,
         output=args.output,
+        resume=args.resume,
     )
 
 
