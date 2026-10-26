@@ -477,6 +477,7 @@ async def main_async(config: RunConfig) -> int:
     print(f"Listo: {sink.rows} filas, {total_errors} turnos con error, {total_cost:.4f} $ en total{simulated}, "
           f"{(time.perf_counter() - started) / 60:.1f} min. CSV: {config.output}")
     _write_excel_next_to(config.output)
+    print(f"Siguiente: las tablas del informe con  uv run python -m evals.stress.report --csv {config.output}")
     return 0
 
 
