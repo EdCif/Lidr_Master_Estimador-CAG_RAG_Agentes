@@ -60,18 +60,16 @@ explican en ``TurnObservation``.
 
 from __future__ import annotations
 
-import logging
-import sys
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal
 
-import structlog
 from pydantic import BaseModel, Field
 
 from app.services.attachments.common import ReplyStats
+from app.services.json_logger import make_json_logger
 from app.services.model_costs import estimate_cost_usd
 
 if TYPE_CHECKING:
@@ -261,39 +259,10 @@ def count_anchors(metadata: ProjectMetadata | Mapping[str, Any] | None) -> int:
 # 4. El registro con structlog
 # ---------------------------------------------------------------------------
 
-def _make_logger() -> Any:
-    """Prepara el logger de structlog que escribe una línea JSON por turno.
-
-    structlog construye el evento (nombre, campos y nivel) y lo convierte en
-    una línea JSON; después se lo pasa al ``logging`` estándar de
-    Python, que es quien lo escribe. Así no tocamos la configuración global
-    de structlog ni la de los logs de uvicorn: solo este logger escribe JSON.
-
-    uvicorn no configura el logging de nuestra aplicación, así que sin un
-    "handler" propio estas líneas no saldrían por la consola. Le ponemos uno
-    que escribe en la salida estándar (una sola vez, aunque el módulo se
-    cargue dos veces).
-
-    No añadimos la marca de hora de structlog (TimeStamper): la observación
-    ya lleva la suya, ``observed_at``, y estaría repetida.
-    """
-    std_logger = logging.getLogger(TURN_OBSERVED)
-    std_logger.setLevel(logging.INFO)
-    if not std_logger.handlers:
-        handler = logging.StreamHandler(sys.stdout)
-        handler.setFormatter(logging.Formatter("%(message)s"))
-        std_logger.addHandler(handler)
-    return structlog.wrap_logger(
-        std_logger,
-        wrapper_class=structlog.stdlib.BoundLogger,
-        processors=[
-            structlog.processors.add_log_level,
-            structlog.processors.JSONRenderer(ensure_ascii=False),
-        ],
-    )
-
-
-_log = _make_logger()
+# La configuración (línea JSON por evento, sin marca de hora de structlog
+# porque la observación ya lleva la suya, ``observed_at``) vive en
+# app/services/json_logger.py, compartida con el pipeline de embeddings.
+_log = make_json_logger(TURN_OBSERVED)
 
 
 # ---------------------------------------------------------------------------
