@@ -101,7 +101,12 @@ class Settings(BaseSettings):
     # sin proceso aparte ni límite: solo para depurar.
     attachment_extraction_timeout_s: float = Field(default=30, ge=0)
 
-    @field_validator("openai_api_key", "llm_model", mode="before")
+    # Sesión 07 · Modelo de OpenAI que convierte texto en vectores (embeddings).
+    # Usa la misma OPENAI_API_KEY de arriba. Las 1536 dimensiones del vector
+    # son fijas para este modelo y viven como constante en el embedder.
+    embedding_model: str = Field(default="text-embedding-3-small", min_length=1)
+
+    @field_validator("openai_api_key", "llm_model", "embedding_model", mode="before")
     @classmethod
     def strip_openai_values(cls, value: object) -> object:
         """Elimina espacios exteriores y permite detectar valores en blanco."""

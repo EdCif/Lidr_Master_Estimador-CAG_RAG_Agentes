@@ -28,8 +28,11 @@ __pycache__/
 build/
 dist/
 
-# Datos locales e informes generados por el pipeline.
-data/
+# Datos locales e informes generados por el pipeline. «data/*» (y no «data/»)
+# para poder hacer una excepción: el dataset de ejemplo de la sesión 7 sí se
+# sube; la SQLite de ideas y los vectores generados, no.
+data/*
+!data/budgets_sample.json
 artifacts/
 
 # Sesión 6 - Los PDF del stress test se generan solos (evals/stress/fixtures/

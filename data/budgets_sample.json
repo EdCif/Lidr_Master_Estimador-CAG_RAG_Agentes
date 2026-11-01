@@ -1,0 +1,611 @@
+[
+  {
+    "budget_id": "BUD-2024-001",
+    "client_metadata": { "name": "AlbaPay", "sector": "finance", "country": "ES" },
+    "project_summary": "API de banca móvil con autenticación OAuth 2.0 y cumplimiento de PSD2",
+    "main_technology": "ruby_on_rails",
+    "year": 2024,
+    "total_estimated_hours": 480,
+    "components": [
+      {
+        "component_id": "AUTH-001",
+        "name": "Backend de autenticación OAuth 2.0",
+        "description": "Implementación de los flujos OAuth 2.0 (código de autorización y refresh token) con sesiones basadas en JWT, aislamiento de tokens por cliente y límite de peticiones.",
+        "tech_stack": ["ruby_on_rails", "postgresql", "redis"],
+        "estimated_hours": 120,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "PSD2-002",
+        "name": "Conectores de banca abierta PSD2",
+        "description": "Endpoints de consulta de cuentas e inicio de pagos conformes a PSD2 y Berlin Group, con autenticación reforzada del cliente (SCA) y gestión de consentimientos.",
+        "tech_stack": ["ruby_on_rails", "postgresql"],
+        "estimated_hours": 160,
+        "complexity": "high",
+        "dependencies": ["AUTH-001"]
+      },
+      {
+        "component_id": "TXN-003",
+        "name": "Libro mayor de transacciones",
+        "description": "Libro mayor de doble entrada con escrituras idempotentes, conciliación diaria y registro de auditoría de cada cambio de saldo.",
+        "tech_stack": ["ruby_on_rails", "postgresql", "sidekiq"],
+        "estimated_hours": 140,
+        "complexity": "medium",
+        "dependencies": ["AUTH-001"]
+      },
+      {
+        "component_id": "NOTIF-004",
+        "name": "Notificaciones push y por email",
+        "description": "Avisos por eventos de transacciones y de seguridad, enviados por APNs y FCM y por correo transaccional.",
+        "tech_stack": ["ruby_on_rails", "redis"],
+        "estimated_hours": 60,
+        "complexity": "low",
+        "dependencies": ["TXN-003"]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-002",
+    "client_metadata": { "name": "Credinova", "sector": "finance", "country": "MX" },
+    "project_summary": "Plataforma de originación de préstamos con scoring crediticio y firma electrónica",
+    "main_technology": "python_django",
+    "year": 2024,
+    "total_estimated_hours": 430,
+    "components": [
+      {
+        "component_id": "SCORE-001",
+        "name": "Motor de scoring crediticio",
+        "description": "Servicio de scoring basado en reglas y en un modelo estadístico que lee datos de burós de crédito y extractos bancarios y devuelve una banda de riesgo con su explicación.",
+        "tech_stack": ["python_django", "postgresql", "scikit_learn"],
+        "estimated_hours": 150,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "KYC-002",
+        "name": "Verificación de identidad (KYC)",
+        "description": "Alta de clientes con validación del documento de identidad y prueba de vida, consulta a listas de sanciones y revisión manual de los casos dudosos.",
+        "tech_stack": ["python_django", "postgresql", "celery"],
+        "estimated_hours": 110,
+        "complexity": "medium",
+        "dependencies": []
+      },
+      {
+        "component_id": "SIGN-003",
+        "name": "Firma electrónica de contratos",
+        "description": "Generación del contrato en PDF y firma electrónica avanzada con sellado de tiempo, y custodia del documento firmado.",
+        "tech_stack": ["python_django", "s3"],
+        "estimated_hours": 80,
+        "complexity": "medium",
+        "dependencies": ["SCORE-001"]
+      },
+      {
+        "component_id": "DASH-004",
+        "name": "Panel de seguimiento de solicitudes",
+        "description": "Panel interno para analistas con la cola de solicitudes, su estado y filtros por riesgo, importe y antigüedad.",
+        "tech_stack": ["python_django", "react", "postgresql"],
+        "estimated_hours": 90,
+        "complexity": "low",
+        "dependencies": ["SCORE-001"]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2023-003",
+    "client_metadata": { "name": "SeguroLuz", "sector": "finance", "country": "CO" },
+    "project_summary": "Plataforma de seguros de hogar con cotizador en línea y gestión de siniestros",
+    "main_technology": "java_spring",
+    "year": 2023,
+    "total_estimated_hours": 330,
+    "components": [
+      {
+        "component_id": "QUOTE-001",
+        "name": "Cotizador en línea",
+        "description": "Calculadora de primas con reglas por zona, tipo de vivienda y coberturas, con guardado de presupuestos y envío por correo al cliente.",
+        "tech_stack": ["java_spring", "postgresql", "redis"],
+        "estimated_hours": 100,
+        "complexity": "medium",
+        "dependencies": []
+      },
+      {
+        "component_id": "CLAIM-002",
+        "name": "Gestión de siniestros",
+        "description": "Alta de siniestros con fotos y documentos, asignación a peritos y seguimiento del estado hasta el pago de la indemnización.",
+        "tech_stack": ["java_spring", "postgresql", "s3"],
+        "estimated_hours": 140,
+        "complexity": "high",
+        "dependencies": ["QUOTE-001"]
+      },
+      {
+        "component_id": "PAY-003",
+        "name": "Cobro recurrente de pólizas",
+        "description": "Cobro mensual de primas con reintentos ante el fallo de una tarjeta, avisos al cliente y conciliación con la pasarela de pago.",
+        "tech_stack": ["java_spring", "postgresql", "kafka"],
+        "estimated_hours": 90,
+        "complexity": "medium",
+        "dependencies": ["QUOTE-001"]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2025-004",
+    "client_metadata": { "name": "PagaLink", "sector": "finance", "country": "ES" },
+    "project_summary": "Plataforma de pagos entre empresas con facturación electrónica y conciliación automática",
+    "main_technology": "go",
+    "year": 2025,
+    "total_estimated_hours": 300,
+    "components": [
+      {
+        "component_id": "RECON-001",
+        "name": "Motor de conciliación bancaria",
+        "description": "Cruce automático de los movimientos bancarios con las facturas emitidas, con tolerancias configurables y una cola de excepciones para revisión humana.",
+        "tech_stack": ["go", "postgresql", "kafka"],
+        "estimated_hours": 130,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "INV-002",
+        "name": "Facturación electrónica",
+        "description": "Emisión de facturas con formato legal, numeración correlativa, firma y envío a la administración tributaria, con reintentos si el servicio no responde.",
+        "tech_stack": ["go", "postgresql"],
+        "estimated_hours": 110,
+        "complexity": "medium",
+        "dependencies": []
+      },
+      {
+        "component_id": "HOOK-003",
+        "name": "Avisos de pago a los clientes (webhooks)",
+        "description": "Notificaciones firmadas a los sistemas del cliente cuando cambia el estado de un pago, con reintentos con espera creciente y registro de entregas.",
+        "tech_stack": ["go", "redis"],
+        "estimated_hours": 60,
+        "complexity": "low",
+        "dependencies": ["RECON-001"]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2023-005",
+    "client_metadata": { "name": "ModaNorte", "sector": "ecommerce", "country": "ES" },
+    "project_summary": "Tienda online de moda con carrito, pagos e inventario por tienda",
+    "main_technology": "node",
+    "year": 2023,
+    "total_estimated_hours": 380,
+    "components": [
+      {
+        "component_id": "CART-001",
+        "name": "Carrito y proceso de compra",
+        "description": "Carrito persistente entre dispositivos, cálculo de impuestos y gastos de envío, códigos de descuento y pago en un solo paso.",
+        "tech_stack": ["node", "postgresql", "redis"],
+        "estimated_hours": 110,
+        "complexity": "medium",
+        "dependencies": []
+      },
+      {
+        "component_id": "PAY-002",
+        "name": "Integración de pasarelas de pago",
+        "description": "Pago con tarjeta y monederos digitales con 3-D Secure, gestión de reembolsos y conciliación diaria.",
+        "tech_stack": ["node", "postgresql"],
+        "estimated_hours": 90,
+        "complexity": "high",
+        "dependencies": ["CART-001"]
+      },
+      {
+        "component_id": "STOCK-003",
+        "name": "Gestión de inventario por tienda",
+        "description": "Existencias por almacén y por tienda física, con reservas al comprar y alertas de rotura de stock.",
+        "tech_stack": ["node", "postgresql", "rabbitmq"],
+        "estimated_hours": 100,
+        "complexity": "medium",
+        "dependencies": []
+      },
+      {
+        "component_id": "SEARCH-004",
+        "name": "Buscador de catálogo con filtros",
+        "description": "Búsqueda de productos con filtros por talla, color y precio, sugerencias al escribir y ordenación por relevancia.",
+        "tech_stack": ["node", "elasticsearch"],
+        "estimated_hours": 80,
+        "complexity": "medium",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-006",
+    "client_metadata": { "name": "ArteMercado", "sector": "ecommerce", "country": "MX" },
+    "project_summary": "Marketplace de productos artesanales con vendedores independientes",
+    "main_technology": "python_fastapi",
+    "year": 2024,
+    "total_estimated_hours": 400,
+    "components": [
+      {
+        "component_id": "VENDOR-001",
+        "name": "Alta y gestión de vendedores",
+        "description": "Registro de vendedores con verificación de documentos, catálogo propio y panel de pedidos y liquidaciones.",
+        "tech_stack": ["python_fastapi", "postgresql", "react"],
+        "estimated_hours": 130,
+        "complexity": "medium",
+        "dependencies": []
+      },
+      {
+        "component_id": "SPLIT-002",
+        "name": "Reparto de pagos entre vendedores",
+        "description": "Cobro único al comprador y reparto automático de lo cobrado entre los vendedores, con la comisión de la plataforma y las retenciones.",
+        "tech_stack": ["python_fastapi", "postgresql", "stripe_connect"],
+        "estimated_hours": 120,
+        "complexity": "high",
+        "dependencies": ["VENDOR-001"]
+      },
+      {
+        "component_id": "REVIEW-003",
+        "name": "Valoraciones y reseñas",
+        "description": "Valoraciones de compradores verificados con moderación automática de contenido ofensivo y respuesta del vendedor.",
+        "tech_stack": ["python_fastapi", "postgresql"],
+        "estimated_hours": 60,
+        "complexity": "low",
+        "dependencies": ["VENDOR-001"]
+      },
+      {
+        "component_id": "SHIP-004",
+        "name": "Cálculo de envíos con varios transportistas",
+        "description": "Tarifas y etiquetas de envío con varios transportistas, seguimiento del paquete y avisos al comprador.",
+        "tech_stack": ["python_fastapi", "redis"],
+        "estimated_hours": 90,
+        "complexity": "medium",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2025-007",
+    "client_metadata": { "name": "FrescoYa", "sector": "ecommerce", "country": "AR" },
+    "project_summary": "Supermercado online con reparto en franjas horarias",
+    "main_technology": "java_spring",
+    "year": 2025,
+    "total_estimated_hours": 320,
+    "components": [
+      {
+        "component_id": "SLOT-001",
+        "name": "Reserva de franjas de entrega",
+        "description": "Calendario de franjas con capacidad por zona y por repartidor, bloqueo temporal de la franja elegida durante la compra y liberación automática si no se completa.",
+        "tech_stack": ["java_spring", "postgresql", "redis"],
+        "estimated_hours": 100,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "ROUTE-002",
+        "name": "Planificación de rutas de reparto",
+        "description": "Agrupación de pedidos por zona y cálculo de la ruta diaria de cada repartidor respetando las ventanas horarias.",
+        "tech_stack": ["java_spring", "postgresql"],
+        "estimated_hours": 150,
+        "complexity": "high",
+        "dependencies": ["SLOT-001"]
+      },
+      {
+        "component_id": "SUBST-003",
+        "name": "Sustitución de productos agotados",
+        "description": "Propuesta de alternativas cuando falta un producto, con aceptación o rechazo del cliente desde la aplicación y ajuste automático del importe.",
+        "tech_stack": ["java_spring", "postgresql"],
+        "estimated_hours": 70,
+        "complexity": "medium",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2023-008",
+    "client_metadata": { "name": "CafeBox", "sector": "ecommerce", "country": "PT" },
+    "project_summary": "Plataforma de suscripciones de café con cobro recurrente",
+    "main_technology": "dotnet",
+    "year": 2023,
+    "total_estimated_hours": 240,
+    "components": [
+      {
+        "component_id": "SUB-001",
+        "name": "Gestión de suscripciones",
+        "description": "Planes de entrega semanal o mensual con pausa, cambio de plan y cancelación hechos por el propio cliente.",
+        "tech_stack": ["dotnet", "postgresql"],
+        "estimated_hours": 90,
+        "complexity": "medium",
+        "dependencies": []
+      },
+      {
+        "component_id": "BILL-002",
+        "name": "Cobro recurrente y facturas",
+        "description": "Cobro periódico con reintentos y avisos de tarjeta caducada, y facturas generadas automáticamente.",
+        "tech_stack": ["dotnet", "postgresql", "hangfire"],
+        "estimated_hours": 100,
+        "complexity": "medium",
+        "dependencies": ["SUB-001"]
+      },
+      {
+        "component_id": "MAIL-003",
+        "name": "Correos de retención de clientes",
+        "description": "Correos automáticos según el comportamiento del cliente (pausa, impago, aniversario), con plantillas y medición de aperturas.",
+        "tech_stack": ["dotnet", "sendgrid"],
+        "estimated_hours": 50,
+        "complexity": "low",
+        "dependencies": ["SUB-001"]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-009",
+    "client_metadata": { "name": "Clínica Aurora", "sector": "healthcare", "country": "ES" },
+    "project_summary": "Portal del paciente con citas, resultados clínicos y renovación de recetas",
+    "main_technology": "python_django",
+    "year": 2024,
+    "total_estimated_hours": 370,
+    "components": [
+      {
+        "component_id": "APPT-001",
+        "name": "Reserva de citas",
+        "description": "Agenda por especialista y centro con recordatorios por SMS y correo, y cancelación o cambio de cita por el propio paciente.",
+        "tech_stack": ["python_django", "postgresql", "celery"],
+        "estimated_hours": 100,
+        "complexity": "medium",
+        "dependencies": []
+      },
+      {
+        "component_id": "RESULT-002",
+        "name": "Consulta de resultados clínicos",
+        "description": "Acceso seguro a analíticas e informes en PDF, con registro de cada acceso y consentimiento explícito del paciente.",
+        "tech_stack": ["python_django", "postgresql", "s3"],
+        "estimated_hours": 120,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "RX-003",
+        "name": "Renovación de recetas",
+        "description": "Solicitud de renovación de recetas crónicas con revisión del médico y envío a la farmacia elegida.",
+        "tech_stack": ["python_django", "postgresql"],
+        "estimated_hours": 80,
+        "complexity": "medium",
+        "dependencies": ["RESULT-002"]
+      },
+      {
+        "component_id": "AUDIT-004",
+        "name": "Registro de auditoría de accesos",
+        "description": "Traza inmutable de quién consultó qué dato del paciente y cuándo, con informes para el responsable de protección de datos.",
+        "tech_stack": ["python_django", "postgresql"],
+        "estimated_hours": 70,
+        "complexity": "high",
+        "dependencies": ["RESULT-002"]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2025-010",
+    "client_metadata": { "name": "TeleSalud Andina", "sector": "healthcare", "country": "CL" },
+    "project_summary": "Plataforma de telemedicina con videoconsulta y sala de espera virtual",
+    "main_technology": "node",
+    "year": 2025,
+    "total_estimated_hours": 280,
+    "components": [
+      {
+        "component_id": "VIDEO-001",
+        "name": "Videoconsulta cifrada",
+        "description": "Sala de videollamada entre médico y paciente con cifrado de extremo a extremo, sala de espera virtual y grabación opcional con consentimiento.",
+        "tech_stack": ["node", "webrtc", "redis"],
+        "estimated_hours": 140,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "QUEUE-002",
+        "name": "Sala de espera y turnos",
+        "description": "Cola de pacientes por especialidad con tiempo estimado de espera y aviso cuando el médico está listo.",
+        "tech_stack": ["node", "redis"],
+        "estimated_hours": 60,
+        "complexity": "low",
+        "dependencies": ["VIDEO-001"]
+      },
+      {
+        "component_id": "RECORD-003",
+        "name": "Historial de la consulta",
+        "description": "Resumen de cada consulta con diagnóstico, indicaciones y archivos adjuntos, accesible para el paciente y para su médico de cabecera.",
+        "tech_stack": ["node", "postgresql"],
+        "estimated_hours": 80,
+        "complexity": "medium",
+        "dependencies": ["VIDEO-001"]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2023-011",
+    "client_metadata": { "name": "LabTrazo", "sector": "healthcare", "country": "ES" },
+    "project_summary": "Gestión de laboratorio clínico con trazabilidad de muestras",
+    "main_technology": "java_spring",
+    "year": 2023,
+    "total_estimated_hours": 370,
+    "components": [
+      {
+        "component_id": "SAMPLE-001",
+        "name": "Trazabilidad de muestras",
+        "description": "Seguimiento de cada muestra desde la extracción hasta el informe mediante códigos de barras, con registro de cada traspaso y de la cadena de frío.",
+        "tech_stack": ["java_spring", "postgresql"],
+        "estimated_hours": 130,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "HL7-002",
+        "name": "Integración con analizadores (HL7)",
+        "description": "Recepción automática de los resultados de los analizadores en formato HL7, con validación de rangos y una cola de errores.",
+        "tech_stack": ["java_spring", "rabbitmq"],
+        "estimated_hours": 150,
+        "complexity": "high",
+        "dependencies": ["SAMPLE-001"]
+      },
+      {
+        "component_id": "REPORT-003",
+        "name": "Informes de resultados",
+        "description": "Generación de informes con valores de referencia, alertas por resultados críticos y firma del facultativo.",
+        "tech_stack": ["java_spring", "postgresql"],
+        "estimated_hours": 90,
+        "complexity": "medium",
+        "dependencies": ["HL7-002"]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-012",
+    "client_metadata": { "name": "CronoCare", "sector": "healthcare", "country": "PE" },
+    "project_summary": "Aplicación de seguimiento de pacientes crónicos con dispositivos de medición",
+    "main_technology": "dotnet",
+    "year": 2024,
+    "total_estimated_hours": 260,
+    "components": [
+      {
+        "component_id": "DEVICE-001",
+        "name": "Conexión con dispositivos de medición",
+        "description": "Lectura de glucómetros y tensiómetros por Bluetooth y sincronización de las mediciones con el servidor.",
+        "tech_stack": ["dotnet", "mqtt"],
+        "estimated_hours": 110,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "ALERT-002",
+        "name": "Alertas por valores fuera de rango",
+        "description": "Reglas por paciente que avisan al equipo médico cuando una medición se sale de su rango, con escalado si nadie responde.",
+        "tech_stack": ["dotnet", "postgresql", "redis"],
+        "estimated_hours": 90,
+        "complexity": "medium",
+        "dependencies": ["DEVICE-001"]
+      },
+      {
+        "component_id": "COACH-003",
+        "name": "Recordatorios y seguimiento",
+        "description": "Recordatorios de medicación y de mediciones, con un resumen semanal para el paciente.",
+        "tech_stack": ["dotnet", "postgresql"],
+        "estimated_hours": 60,
+        "complexity": "low",
+        "dependencies": []
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2025-013",
+    "client_metadata": { "name": "Fabrika Sensa", "sector": "industrial", "country": "DE" },
+    "project_summary": "Mantenimiento predictivo de maquinaria industrial con sensores",
+    "main_technology": "python_fastapi",
+    "year": 2025,
+    "total_estimated_hours": 460,
+    "components": [
+      {
+        "component_id": "INGEST-001",
+        "name": "Ingesta de datos de sensores",
+        "description": "Recepción de lecturas de miles de sensores por MQTT, validación y almacenamiento en una base de datos de series temporales.",
+        "tech_stack": ["python_fastapi", "mqtt", "timescaledb"],
+        "estimated_hours": 140,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "PRED-002",
+        "name": "Modelo de predicción de fallos",
+        "description": "Modelo que estima la probabilidad de fallo de cada máquina a partir de su histórico, con reentrenamiento programado y control de calidad.",
+        "tech_stack": ["python_fastapi", "scikit_learn"],
+        "estimated_hours": 160,
+        "complexity": "high",
+        "dependencies": ["INGEST-001"]
+      },
+      {
+        "component_id": "PLANT-003",
+        "name": "Panel de estado de planta",
+        "description": "Vista en tiempo real del estado de las máquinas, con las alertas activas y las órdenes de mantenimiento generadas.",
+        "tech_stack": ["python_fastapi", "react"],
+        "estimated_hours": 90,
+        "complexity": "medium",
+        "dependencies": ["INGEST-001"]
+      },
+      {
+        "component_id": "ORDER-004",
+        "name": "Órdenes de mantenimiento automáticas",
+        "description": "Creación y asignación de órdenes de trabajo cuando el modelo detecta riesgo, con integración con el sistema de mantenimiento de la fábrica.",
+        "tech_stack": ["python_fastapi", "postgresql"],
+        "estimated_hours": 70,
+        "complexity": "medium",
+        "dependencies": ["PRED-002"]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2023-014",
+    "client_metadata": { "name": "LogiNave", "sector": "industrial", "country": "ES" },
+    "project_summary": "Gestión de almacén automatizado con preparación de pedidos y control de muelles",
+    "main_technology": "go",
+    "year": 2023,
+    "total_estimated_hours": 280,
+    "components": [
+      {
+        "component_id": "WMS-001",
+        "name": "Gestión de ubicaciones y existencias",
+        "description": "Mapa del almacén con ubicaciones, entradas, salidas y reubicaciones, con inventario cíclico sin parar la operación.",
+        "tech_stack": ["go", "postgresql"],
+        "estimated_hours": 120,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "PICK-002",
+        "name": "Preparación de pedidos (picking)",
+        "description": "Asignación de pedidos a operarios con rutas óptimas por el almacén y confirmación con lector de códigos.",
+        "tech_stack": ["go", "postgresql", "redis"],
+        "estimated_hours": 100,
+        "complexity": "medium",
+        "dependencies": ["WMS-001"]
+      },
+      {
+        "component_id": "DOCK-003",
+        "name": "Control de muelles y camiones",
+        "description": "Citas de descarga y carga por muelle, registro de llegadas y aviso al responsable cuando un camión se retrasa.",
+        "tech_stack": ["go", "postgresql"],
+        "estimated_hours": 60,
+        "complexity": "low",
+        "dependencies": ["WMS-001"]
+      }
+    ]
+  },
+  {
+    "budget_id": "BUD-2024-015",
+    "client_metadata": { "name": "EnerGrid Sur", "sector": "industrial", "country": "FR" },
+    "project_summary": "Telemetría y alarmas para una planta de producción de energía",
+    "main_technology": "dotnet",
+    "year": 2024,
+    "total_estimated_hours": 320,
+    "components": [
+      {
+        "component_id": "TELE-001",
+        "name": "Telemetría de subestaciones",
+        "description": "Lectura periódica de contadores y subestaciones por protocolos industriales, con almacenamiento y control de huecos en los datos.",
+        "tech_stack": ["dotnet", "opc_ua", "timescaledb"],
+        "estimated_hours": 150,
+        "complexity": "high",
+        "dependencies": []
+      },
+      {
+        "component_id": "ALARM-002",
+        "name": "Gestión de alarmas",
+        "description": "Clasificación de alarmas por gravedad, reconocimiento por el operador y escalado automático, con registro completo.",
+        "tech_stack": ["dotnet", "postgresql"],
+        "estimated_hours": 100,
+        "complexity": "medium",
+        "dependencies": ["TELE-001"]
+      },
+      {
+        "component_id": "REG-003",
+        "name": "Informes regulatorios",
+        "description": "Informes mensuales de producción y disponibilidad con el formato que exige el regulador, generados y archivados de forma automática.",
+        "tech_stack": ["dotnet", "postgresql"],
+        "estimated_hours": 70,
+        "complexity": "low",
+        "dependencies": ["TELE-001"]
+      }
+    ]
+  }
+]
