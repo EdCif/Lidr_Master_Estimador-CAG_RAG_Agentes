@@ -20,6 +20,7 @@ dependencies = [
     "python-docx>=1.2.0",
     "streamlit>=1.64.0",
     "structlog>=26.1.0",
+    "tiktoken>=0.14.0",
     "uvicorn>=0.30,<1",
 ]
 
