@@ -1,0 +1,50 @@
+# .dockerignore · Lo que Docker NO debe llevarse al construir la imagen.
+#
+# Cuando se construye una imagen, Docker recibe una copia de esta carpeta (el
+# «contexto»). Todo lo que se lista aquí se queda fuera: la imagen sale más
+# pequeña, se construye más rápido y, sobre todo, no se cuela nada privado.
+
+# --- LO MÁS IMPORTANTE: claves y credenciales -------------------------------
+# La clave de OpenAI vive en .env. Una imagen se puede compartir o subir a un
+# registro; si la clave entrara dentro, quedaría expuesta para siempre. La clave
+# se pasa al ARRANCAR el contenedor (env_file de docker-compose), no al construir.
+.env
+.env.*
+*.pem
+*.key
+secrets/
+
+# --- Entorno y cachés (se recrean dentro de la imagen) -----------------------
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# --- Control de versiones y automatización -----------------------------------
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# --- Cuadernos y trabajo interno (no son parte del programa) -----------------
+CLAUDE.md
+CLAUDE.local.md
+estado_proyecto.md
+automejora.md
+.claude/
+planes/
+
+# --- Pruebas, evaluaciones e informes (la API no los necesita) ---------------
+tests/
+evals/
+artifacts/
+
+# --- Datos locales: se montan desde tu ordenador en docker-compose -----------
+data/
+
+# --- Interfaz Streamlit y documentación general ------------------------------
+.streamlit/
+streamlit_app.py
+arrancar_todo.bat
+README.md

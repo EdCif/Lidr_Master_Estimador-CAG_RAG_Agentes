@@ -267,6 +267,14 @@ class IngestRequestTests(unittest.TestCase):
 
         self.assertEqual(len(request.budgets[0].components), 2)
 
+    def test_the_example_file_used_in_the_readme_is_valid(self):
+        """docs/ejemplos/ingest_ejemplo.json es el que se manda con curl en el README."""
+        example_file = Path(__file__).resolve().parent.parent / "docs" / "ejemplos" / "ingest_ejemplo.json"
+
+        request = IngestRequest.model_validate(json.loads(example_file.read_text(encoding="utf-8")))
+
+        self.assertEqual(len(request.budgets), 1)
+
     def test_the_docs_example_is_also_published_as_example_for_openapi_30(self):
         """La API usa OpenAPI 3.0.3: /docs solo rellena el formulario con ``example`` (singular)."""
         schema = IngestRequest.model_json_schema()

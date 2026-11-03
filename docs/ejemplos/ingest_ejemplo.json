@@ -1,0 +1,45 @@
+{
+  "budgets": [
+    {
+      "budget_id": "BUD-2024-901",
+      "client_metadata": {
+        "country": "ES",
+        "name": "Cliente de ejemplo",
+        "sector": "finance"
+      },
+      "components": [
+        {
+          "complexity": "high",
+          "component_id": "AUTH-001",
+          "dependencies": [],
+          "description": "Flujos OAuth 2.0 con sesiones basadas en JWT y límite de peticiones.",
+          "estimated_hours": 120,
+          "name": "Backend de autenticación OAuth 2.0",
+          "tech_stack": [
+            "ruby_on_rails",
+            "postgresql",
+            "redis"
+          ]
+        },
+        {
+          "complexity": "low",
+          "component_id": "NOTIF-002",
+          "dependencies": [
+            "AUTH-001"
+          ],
+          "description": "Avisos de transacciones y de seguridad por push y correo.",
+          "estimated_hours": 60,
+          "name": "Notificaciones push y por email",
+          "tech_stack": [
+            "ruby_on_rails",
+            "redis"
+          ]
+        }
+      ],
+      "main_technology": "ruby_on_rails",
+      "project_summary": "API de banca móvil con autenticación OAuth 2.0",
+      "total_estimated_hours": 180,
+      "year": 2024
+    }
+  ]
+}

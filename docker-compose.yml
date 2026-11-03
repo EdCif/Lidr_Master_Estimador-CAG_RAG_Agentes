@@ -1,0 +1,47 @@
+# docker-compose.yml · Cómo arrancar la API en un contenedor (sesión 7).
+#
+# Docker Compose lee este fichero y arranca lo que describe: «servicios», cada
+# uno en su contenedor. Ahora hay uno, la API (ai_service). La sesión 8 añadirá
+# aquí un segundo servicio, la base de datos Postgres con pgvector.
+#
+# Desde la raíz del repo:
+#   docker compose up --build -d      construir la imagen y arrancar (en segundo plano)
+#   docker compose ps                 ver el estado (debe decir «healthy»)
+#   docker compose logs -f ai_service ver el registro de la API (Ctrl+C para salir)
+#   docker compose restart ai_service reiniciar tras cambiar código de app/
+#   docker compose down               parar y quitar el contenedor
+#
+# Ojo: la API local (uvicorn en el 8001) y la del contenedor no pueden estar a
+# la vez en el mismo puerto. Para usar otro puerto: AI_SERVICE_PORT=8021 docker compose up -d
+
+services:
+  ai_service:
+    build: .
+    image: estimador-ai-service
+
+    ports:
+      # 127.0.0.1 es CLAVE: sin él, Docker publicaría la API en todas las
+      # direcciones de tu ordenador y cualquiera de tu red podría usarla (y
+      # gastar tu saldo de OpenAI). Así solo se llega desde este equipo.
+      # Dentro del contenedor la API usa el 8000; fuera, el 8001 (el 8000 de
+      # este equipo lo usa otro proyecto).
+      - "127.0.0.1:${AI_SERVICE_PORT:-8001}:8000"
+
+    # La clave de OpenAI y el resto de variables entran AQUÍ, al arrancar, desde
+    # el .env de tu ordenador. No están dentro de la imagen (ver .dockerignore).
+    env_file: .env
+
+    # Carpetas de tu ordenador que el contenedor ve como suyas (bind mounts):
+    #   - scripts/: un cambio en un script se nota al momento.
+    #   - app/: el código; la API no recarga sola, así que tras un cambio hay
+    #     que hacer «docker compose restart ai_service».
+    #   - data/: la SQLite de las ideas y los vectores generados quedan en tu
+    #     ordenador, no se pierden al borrar el contenedor.
+    volumes:
+      - ./app:/app/app
+      - ./scripts:/app/scripts
+      - ./data:/app/data
+
+    # Si la API se cae o el equipo se reinicia, Docker la vuelve a arrancar
+    # (salvo que la pares tú con «docker compose down»).
+    restart: unless-stopped
