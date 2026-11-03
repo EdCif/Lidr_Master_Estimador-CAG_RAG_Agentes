@@ -14,8 +14,11 @@ Qué códigos devuelve y por qué:
 
 - **200**: todo bien. Los chunks con su vector y las estadísticas.
 - **422**: la petición no es válida. Lo detecta FastAPI solo con los moldes
-  (sector inventado, horas negativas...) o lo decidimos aquí si un componente
-  es tan largo que no cabe en el modelo (el mensaje dice cuál hay que acortar).
+  (sector inventado, horas negativas, demasiados presupuestos...) o lo
+  decidimos aquí: un componente tan largo que no cabe en el modelo (el
+  mensaje dice cuál hay que acortar) o una petición que suma más tokens de
+  los permitidos (``MAX_TOKENS_PER_REQUEST``). Las dos se rechazan ANTES de
+  llamar a OpenAI, así que no cuestan nada.
 - **503**: OpenAI pide esperar (límite de peticiones) y se agotaron los 3
   reintentos. Se puede reintentar más tarde.
 - **500**: cualquier otro fallo. El cliente solo recibe un mensaje genérico;
@@ -40,6 +43,25 @@ LOGGER_NAME = "embedding_router"
 _log = make_json_logger(LOGGER_NAME)
 
 router = APIRouter(prefix="/embeddings", tags=["embeddings"])
+
+# Tope de tokens que suma una sola petición. Es el freno de gasto del endpoint:
+# 50.000 tokens cuestan ~0,001 $ y son unas 8 veces el dataset de ejemplo
+# (5.841). Se comprueba con los tokens ya contados por el chunker, antes de
+# llamar a OpenAI. Este endpoint es de un ejercicio formativo: si hiciera
+# falta ingestar más, se manda en varias peticiones.
+MAX_TOKENS_PER_REQUEST = 50_000
+
+
+class RequestTooLargeError(ValueError):
+    """La petición suma más tokens de los permitidos en una sola llamada."""
+
+    def __init__(self, total_tokens: int, limit: int = MAX_TOKENS_PER_REQUEST) -> None:
+        self.total_tokens = total_tokens
+        self.limit = limit
+        super().__init__(
+            f"La petición suma {total_tokens} tokens y el máximo por petición es {limit}. "
+            "Divídela en varias peticiones con menos presupuestos."
+        )
 
 
 def get_chunker() -> JSONStructuralChunker:
@@ -68,7 +90,7 @@ def get_embedder() -> OpenAIEmbedder:
     response_model=IngestResponse,
     summary="Trocea presupuestos y devuelve sus chunks con los vectores",
     responses={
-        422: {"description": "Presupuesto no válido, o un componente demasiado largo para el modelo."},
+        422: {"description": "Presupuesto no válido, petición demasiado grande o componente demasiado largo."},
         500: {"description": "Error inesperado al generar los embeddings (el detalle queda en el log)."},
         503: {"description": "OpenAI pide esperar (límite de peticiones). Inténtalo más tarde."},
     },
@@ -93,9 +115,13 @@ def ingest(
 
     try:
         chunks = chunker.chunk(budgets)  # 1. trocear
+        _check_total_tokens(chunks)  # freno de gasto: antes de llamar a OpenAI
         embedded = embedder.embed_many(chunks)  # 2. vectorizar
     except ChunkTooLargeError as error:
         _log.warning("embeddings_ingest_rejected", chunk_id=error.chunk_id, tokens=error.token_count)
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except RequestTooLargeError as error:
+        _log.warning("embeddings_ingest_rejected", tokens=error.total_tokens, limit=error.limit)
         raise HTTPException(status_code=422, detail=str(error)) from error
     except RateLimitError as error:
         _log.warning("embeddings_ingest_rate_limited", detail=_short(error))
@@ -122,6 +148,13 @@ def ingest(
     )
     _log.info("embeddings_ingest_done", **stats.model_dump())
     return IngestResponse(chunks=embedded, stats=stats)
+
+
+def _check_total_tokens(chunks: list) -> None:
+    """Lanza ``RequestTooLargeError`` si los chunks suman más de ``MAX_TOKENS_PER_REQUEST``."""
+    total = sum(chunk.token_count for chunk in chunks)
+    if total > MAX_TOKENS_PER_REQUEST:
+        raise RequestTooLargeError(total)
 
 
 def _short(error: Exception, limit: int = 300) -> str:

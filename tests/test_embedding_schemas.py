@@ -13,6 +13,10 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from app.embedding_pipeline.schemas import (
+    MAX_BUDGETS_PER_REQUEST,
+    MAX_COMPONENTS_PER_BUDGET,
+    MAX_DESCRIPTION_CHARS,
+    MAX_SUMMARY_CHARS,
     Budget,
     Chunk,
     EmbeddedChunk,
@@ -195,6 +199,55 @@ class ComponentConsistencyTests(unittest.TestCase):
             Budget.model_validate(example(components=components))
 
         self.assertIn("AUTH-001", str(caught.exception))
+
+
+class SizeLimitTests(unittest.TestCase):
+    """Los topes de tamaño: el endpoint gasta dinero, así que se acota lo que puede entrar."""
+
+    def test_limits_are_the_agreed_ones(self):
+        self.assertEqual(
+            (MAX_BUDGETS_PER_REQUEST, MAX_COMPONENTS_PER_BUDGET, MAX_SUMMARY_CHARS, MAX_DESCRIPTION_CHARS),
+            (30, 20, 1_000, 10_000),
+        )
+
+    def test_exactly_the_limit_of_budgets_is_accepted_and_one_more_is_not(self):
+        def request(count: int) -> dict:
+            budgets = []
+            for number in range(count):
+                budget = copy.deepcopy(ENUNCIADO_EXAMPLE)
+                budget["budget_id"] = f"BUD-2024-{number:03d}"
+                budgets.append(budget)
+            return {"budgets": budgets}
+
+        IngestRequest.model_validate(request(MAX_BUDGETS_PER_REQUEST))
+        with self.assertRaises(ValidationError):
+            IngestRequest.model_validate(request(MAX_BUDGETS_PER_REQUEST + 1))
+
+    def test_exactly_the_limit_of_components_is_accepted_and_one_more_is_not(self):
+        def components(count: int) -> list[dict]:
+            items = []
+            for number in range(count):
+                component = copy.deepcopy(ENUNCIADO_EXAMPLE["components"][0])
+                component["component_id"] = f"C-{number:03d}"
+                items.append(component)
+            return items
+
+        Budget.model_validate(example(components=components(MAX_COMPONENTS_PER_BUDGET)))
+        with self.assertRaises(ValidationError):
+            Budget.model_validate(example(components=components(MAX_COMPONENTS_PER_BUDGET + 1)))
+
+    def test_description_and_summary_have_a_maximum_length(self):
+        long_description = copy.deepcopy(ENUNCIADO_EXAMPLE["components"][0])
+
+        long_description["description"] = "x" * MAX_DESCRIPTION_CHARS
+        Budget.model_validate(example(components=[long_description]))
+        long_description["description"] = "x" * (MAX_DESCRIPTION_CHARS + 1)
+        with self.assertRaises(ValidationError):
+            Budget.model_validate(example(components=[long_description]))
+
+        Budget.model_validate(example(project_summary="x" * MAX_SUMMARY_CHARS))
+        with self.assertRaises(ValidationError):
+            Budget.model_validate(example(project_summary="x" * (MAX_SUMMARY_CHARS + 1)))
 
 
 class IngestRequestTests(unittest.TestCase):

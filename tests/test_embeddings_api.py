@@ -196,6 +196,49 @@ async def test_a_component_too_big_for_the_model_is_a_422_that_names_it(embedder
     assert embedder.calls == []  # se rechaza ANTES de gastar nada en OpenAI
 
 
+def budgets_payload(count: int) -> dict:
+    """``count`` presupuestos distintos (2 componentes, y por tanto 2 chunks, cada uno)."""
+    budgets = []
+    for number in range(count):
+        budget = copy.deepcopy(BUDGET)
+        budget["budget_id"] = f"BUD-2024-{number:03d}"
+        budgets.append(budget)
+    return {"budgets": budgets}
+
+
+async def test_a_request_over_the_total_token_limit_is_a_422_before_calling_openai(embedder):
+    # 6 presupuestos x 2 chunks x 5.000 tokens = 60.000 > 50.000.
+    transport = httpx.ASGITransport(app=build_app(embedder, tokens_per_chunk=5_000))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/embeddings/ingest", json=budgets_payload(6))
+
+    assert response.status_code == 422
+    assert "60000" in response.json()["detail"] and "50000" in response.json()["detail"]
+    assert embedder.calls == []  # no se gastó nada en OpenAI
+
+
+async def test_a_request_exactly_at_the_total_token_limit_is_accepted(embedder):
+    # 5 presupuestos x 2 chunks x 5.000 tokens = 50.000: justo en el tope.
+    transport = httpx.ASGITransport(app=build_app(embedder, tokens_per_chunk=5_000))
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/embeddings/ingest", json=budgets_payload(5))
+
+    assert response.status_code == 200
+    assert response.json()["stats"]["total_tokens"] == 50_000
+    assert len(embedder.calls) == 1
+
+
+async def test_too_many_budgets_is_a_422_from_the_schema(client, embedder):
+    response = await client.post("/embeddings/ingest", json=budgets_payload(31))
+
+    assert response.status_code == 422
+    assert embedder.calls == []
+
+
+def test_the_token_limit_is_the_agreed_one():
+    assert router_module.MAX_TOKENS_PER_REQUEST == 50_000
+
+
 # ---------------------------------------------------------------------------
 # 503 y 500: fallos del proveedor
 # ---------------------------------------------------------------------------

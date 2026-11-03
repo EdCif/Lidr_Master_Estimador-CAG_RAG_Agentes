@@ -51,6 +51,20 @@ MetadataValue = str | int | float | list[str]
 # separar luego sin ambigüedad.
 ID_PATTERN = r"^[A-Za-z0-9._-]+$"
 
+# Topes de tamaño de la entrada. El endpoint gasta dinero (cada petición llama
+# a OpenAI) y es un ejercicio formativo: sin límites, una petición enorme
+# costaría de más por error o por abuso. Son holgados para el uso real (el
+# dataset de ejemplo tiene 15 presupuestos, de 3-4 componentes y descripciones
+# de unos 150 caracteres) pero acotan lo peor que se puede mandar. Además, el
+# router limita los tokens TOTALES de cada petición (ver router.py), que es el
+# tope que de verdad protege el gasto.
+MAX_BUDGETS_PER_REQUEST = 30
+MAX_COMPONENTS_PER_BUDGET = 20
+MAX_SUMMARY_CHARS = 1_000
+# 10.000 caracteres son unos 2.500 tokens: deja sitio a la «descripción
+# enorme» (el chunker avisa a partir de 1.000 tokens) sin permitir una novela.
+MAX_DESCRIPTION_CHARS = 10_000
+
 
 class _Model(BaseModel):
     """Base común: quita espacios sobrantes y prohíbe campos que no existen.
@@ -103,7 +117,11 @@ class BudgetComponent(_Model):
         description="Identificador dentro del presupuesto, por ejemplo AUTH-001.",
     )
     name: str = Field(min_length=1, max_length=200, description="Nombre corto del componente.")
-    description: str = Field(min_length=1, description="Qué incluye el componente, en texto libre.")
+    description: str = Field(
+        min_length=1,
+        max_length=MAX_DESCRIPTION_CHARS,
+        description="Qué incluye el componente, en texto libre.",
+    )
     tech_stack: list[str] = Field(
         min_length=1,
         description="Tecnologías del componente, en snake_case y sin repetir.",
@@ -137,7 +155,11 @@ class Budget(_Model):
         description="Identificador del presupuesto, por ejemplo BUD-2024-001.",
     )
     client_metadata: ClientMetadata
-    project_summary: str = Field(min_length=1, description="Resumen del proyecto en una frase.")
+    project_summary: str = Field(
+        min_length=1,
+        max_length=MAX_SUMMARY_CHARS,
+        description="Resumen del proyecto en una frase.",
+    )
     main_technology: str = Field(
         min_length=1,
         max_length=100,
@@ -147,7 +169,8 @@ class Budget(_Model):
     total_estimated_hours: float = Field(ge=0, description="Horas totales del presupuesto.")
     components: list[BudgetComponent] = Field(
         min_length=1,
-        description="Componentes del presupuesto; al menos uno.",
+        max_length=MAX_COMPONENTS_PER_BUDGET,
+        description=f"Componentes del presupuesto: de 1 a {MAX_COMPONENTS_PER_BUDGET}.",
     )
 
     @field_validator("main_technology")
@@ -215,7 +238,11 @@ def _with_swagger_example(extra: dict) -> dict:
 class IngestRequest(_Model):
     """Lo que recibe ``POST /embeddings/ingest``: una lista de presupuestos."""
 
-    budgets: list[Budget] = Field(min_length=1, description="Presupuestos a trocear y vectorizar.")
+    budgets: list[Budget] = Field(
+        min_length=1,
+        max_length=MAX_BUDGETS_PER_REQUEST,
+        description=f"Presupuestos a trocear y vectorizar: de 1 a {MAX_BUDGETS_PER_REQUEST} por petición.",
+    )
 
     model_config = ConfigDict(
         str_strip_whitespace=True,
