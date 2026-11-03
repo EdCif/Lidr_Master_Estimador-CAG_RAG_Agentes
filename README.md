@@ -492,6 +492,198 @@ En la interfaz Streamlit, el panel lateral enseña ahora la ficha del último
 turno («Última llamada») y un apartado **«⚖️ Evaluadores»** que aplica estas
 mismas métricas a la conversación en curso.
 
+## Sesión 7 · Embeddings y chunking de presupuestos
+
+Hasta ahora el estimador lee una transcripción y estima con los ejemplos que
+llevamos escritos en el prompt. El paso siguiente es que, ante un cliente
+nuevo, **busque en los presupuestos históricos los componentes parecidos**
+(«ya hicimos un login con OAuth para un banco: 120 horas»). Esa búsqueda por
+significado necesita convertir cada trozo de presupuesto en una lista de
+números (un *embedding*). Esta sesión construye ese primer tramo; **todavía no
+guarda nada** (la base de datos llega en la sesión 8): los vectores salen en la
+respuesta HTTP.
+
+```text
+presupuestos JSON ──► chunker ──► chunks ──► embedder ──► vectores ──► respuesta
+   (Budget)        (un componente    (texto +     (OpenAI, lotes     (+ estadísticas
+                    = un chunk)      metadata)     de 100)            y coste)
+```
+
+### Resumen de la entrega
+
+| | |
+| --- | --- |
+| **El entregable** | El módulo [app/embedding_pipeline/](app/embedding_pipeline/) (`schemas.py`, `chunker.py`, `embedder.py`, `router.py`), el endpoint `POST /embeddings/ingest`, [scripts/compare.py](scripts/compare.py) y [SANITY_CHECK.md](app/embedding_pipeline/SANITY_CHECK.md). Rama `pre-session-07` (el enunciado la llama `session-07/pre-exercise`). |
+| **Datos** | Un dataset **propio en español**: [data/budgets_sample.json](data/budgets_sample.json), 15 presupuestos (4 sectores, 7 tecnologías principales, años 2023-2025) y 51 componentes. Con el esquema del enunciado: los valores cerrados (`finance`, `high`...) van en inglés y los textos libres en español. |
+| **Qué hace** | Un componente = un chunk, con una cabecera de contexto delante; `text-embedding-3-small` (1536 números), en lotes de 100, con reintentos solo ante el límite de peticiones (429). Cada ingesta dice cuántos tokens y cuántos dólares ha costado. |
+| **Resultado real** | Los 15 presupuestos dan 51 chunks y 5.841 tokens: **0,000117 $**. Los tokens que cuenta tiktoken coinciden con los que factura OpenAI. |
+| **Cómo se prueba** | `uv run python -m pytest tests -v`: 337 tests, sin claves ni red (embedder y contador de tokens falsos). |
+
+### Un chunk, en concreto
+
+Cada componente de cada presupuesto se convierte en un chunk como este (el
+texto que se vectoriza, más su metadata, que viaja aparte y NO se vectoriza):
+
+```text
+chunk_id:  BUD-2024-001::AUTH-001
+
+[Proyecto: API de banca móvil con autenticación OAuth 2.0 y cumplimiento de PSD2]
+[Sector del cliente: finanzas | Año: 2024 | Tecnología principal: ruby_on_rails]
+
+Componente: Backend de autenticación OAuth 2.0
+Descripción: Implementación de los flujos OAuth 2.0 (código de autorización y refresh token)...
+Tecnologías: ruby_on_rails, postgresql, redis
+Complejidad: alta
+Horas estimadas: 120
+
+metadata:  {budget_id, component_id, client_sector: "finance", main_technology,
+            year: 2024, complexity: "high", estimated_hours: 120, tech_stack, chunk_type}
+```
+
+Las tres decisiones del chunker (explicadas en el docstring de
+[chunker.py](app/embedding_pipeline/chunker.py)):
+
+* **Granularidad**: el componente, que es la unidad que razona el negocio. Con el
+  presupuesto entero, el vector sería una mezcla borrosa de temas; con campos
+  sueltos, se perdería el sentido.
+* **Contenido**: la cabecera con el contexto del presupuesto va delante de cada
+  componente. Sin ella, todos los «backend de autenticación» se parecen.
+* **Texto frente a metadata**: lo que da significado va en el texto; lo que sirve
+  para filtrar (año, horas, complejidad, sector) va también en la metadata,
+  porque los embeddings no entienden bien números ni fechas.
+
+### Cómo invocar el endpoint
+
+Con la API en marcha (`uv run uvicorn app.main:app --host 127.0.0.1 --port 8001`):
+
+* **Desde `/docs`**: abre [http://127.0.0.1:8001/docs](http://127.0.0.1:8001/docs),
+  `POST /embeddings/ingest` → *Try it out*. El cuerpo ya viene relleno con un
+  presupuesto de ejemplo; pulsa *Execute*.
+* **Con `curl.exe`** (desde la raíz del repo; el fichero de ejemplo es
+  [docs/ejemplos/ingest_ejemplo.json](docs/ejemplos/ingest_ejemplo.json)):
+
+  ```powershell
+  curl.exe -s -X POST http://127.0.0.1:8001/embeddings/ingest -H "Content-Type: application/json" --data-binary "@docs/ejemplos/ingest_ejemplo.json"
+  ```
+
+* **Con `Invoke-RestMethod`** (se manda el cuerpo como bytes UTF-8 para que
+  PowerShell 5.1 no estropee las tildes):
+
+  ```powershell
+  $body = Get-Content docs\ejemplos\ingest_ejemplo.json -Raw -Encoding UTF8
+  $r = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8001/embeddings/ingest `
+         -ContentType 'application/json; charset=utf-8' -Body ([Text.Encoding]::UTF8.GetBytes($body))
+  $r.stats
+  ```
+
+* **El dataset entero**: `uv run python scripts/ingest_sample.py` lo manda, escribe
+  un resumen (chunks, tokens, coste, tiempo) y guarda la respuesta, con los 51
+  vectores, en `data/embeddings_sample.json` (ignorado por git).
+
+Respuesta (los vectores se recortan aquí; cada uno lleva 1536 números):
+
+```json
+{
+  "chunks": [
+    {"chunk_id": "BUD-2024-901::AUTH-001", "text": "[Proyecto: ...", "metadata": {"...": "..."},
+     "token_count": 113, "embedding": [-0.0264, 0.0153, "..."]}
+  ],
+  "stats": {"total_budgets": 1, "total_chunks": 2, "total_tokens": 210, "estimated_cost_usd": 0.0000042}
+}
+```
+
+| Código | Cuándo |
+| --- | --- |
+| `200` | Todo bien |
+| `422` | El presupuesto no encaja con el esquema (sector inventado, horas negativas, un campo mal escrito, una dependencia a un componente que no existe...), supera un tope de tamaño o un componente no cabe en el modelo. Se rechaza **antes** de llamar a OpenAI |
+| `503` | OpenAI pide esperar y se agotaron los 3 reintentos (1, 2 y 4 s) |
+| `500` | Cualquier otro fallo. El cliente recibe un mensaje genérico; el tipo de error y el detalle quedan en el log del servidor |
+
+**Topes** (el endpoint gasta dinero y es un ejercicio): 30 presupuestos por
+petición, 20 componentes por presupuesto, 10.000 caracteres por descripción y,
+sobre todo, **50.000 tokens por petición** (unos 0,001 $). El dataset de ejemplo
+suma 5.841.
+
+### `compare.py`: cuánto se parecen dos textos
+
+Embebe los dos textos y escribe la similitud coseno, calculada **a mano** (sin
+numpy ni scikit-learn):
+
+```powershell
+uv run python scripts/compare.py --text-a "OAuth 2.0 authentication backend for fintech" --text-b "JWT-based authorization service for banking app"
+# Text A: OAuth 2.0 authentication backend for fintech
+# Text B: JWT-based authorization service for banking app
+# Cosine similarity: 0.6330
+```
+
+Se puede lanzar **fuera del contenedor** (el `.env` se lee solo) y **dentro**:
+
+```powershell
+uv run python scripts/compare.py --text-a "..." --text-b "..."                       # fuera
+docker compose exec ai_service python scripts/compare.py --text-a "..." --text-b "..." # dentro
+```
+
+### Docker
+
+La API también se puede arrancar en un contenedor (el servicio se llama
+`ai_service`, como en el enunciado de la sesión 8, que le añadirá Postgres):
+
+```powershell
+docker compose up --build -d     # construir la imagen y arrancar
+docker compose ps                # el estado debe decir «healthy»
+docker compose down              # parar y quitar el contenedor
+```
+
+La API queda en [http://127.0.0.1:8001/docs](http://127.0.0.1:8001/docs), como
+fuera del contenedor. No pueden estar a la vez la API local y la del contenedor
+en el mismo puerto (`AI_SERVICE_PORT=8021 docker compose up -d` usa otro).
+
+* **La clave no entra en la imagen**: `.dockerignore` excluye `.env*`, y el
+  `docker-compose.yml` la inyecta al arrancar (`env_file`).
+* **El puerto solo se abre en tu equipo**: se publica como `127.0.0.1:8001`. Sin
+  el `127.0.0.1`, cualquiera de tu red podría usar la API y gastar tu saldo.
+* La imagen se construye en dos etapas y corre con un usuario sin privilegios.
+  Pesa unos 1,8 GB, porque el proyecto arrastra Streamlit, Gradio, Chainlit y
+  litellm; no se ha optimizado.
+* `app/`, `scripts/` y `data/` están montadas: un cambio en un script se nota al
+  momento; tras cambiar código de `app/`, `docker compose restart ai_service`.
+
+### Sanity check
+
+Con cuatro parejas de textos ([SANITY_CHECK.md](app/embedding_pipeline/SANITY_CHECK.md)):
+
+| Pareja | Qué es | Similitud |
+| --- | --- | --- |
+| A | Casi sinónimos (inglés) | 0,5957 |
+| B | Sin relación | 0,1919 |
+| C | Genéricos: «Backend services» / «API development» | 0,5408 |
+| D | La frase de A y su traducción al español (extra nuestro) | 0,8177 |
+
+El modelo separa bien lo parecido de lo ajeno (A frente a B), pero hay avisos
+para la sesión 8: los textos cortos y genéricos «parecen cercanos» a casi todo
+(C está a solo 0,055 de A), no existe «el cero» (B da 0,19) y cualquier umbral de
+parecido hay que calibrarlo con búsquedas reales.
+
+### Diferencias con el punto de partida del enunciado
+
+* No hay un «servicio IA» separado de un backend de negocio (Rails): el servicio
+  IA es este mismo proyecto FastAPI, y el módulo nuevo vive en
+  `app/embedding_pipeline/`. No se toca la web ni Streamlit.
+* **Dataset propio en español**, no el fichero del profesor (inglés). Tiene el
+  mismo esquema y nuestros moldes aceptan también el suyo. En el texto de cada
+  chunk las etiquetas van en español («Proyecto», «Sector del cliente»...) y el
+  sector y la complejidad, traducidos; en la metadata siguen en inglés.
+* El servicio de Docker se llama `ai_service` (el enunciado dice `servicio_ia`).
+* **Tests**, aunque el enunciado no los exige (la CI los ejecuta en cada push), y
+  `structlog` se aprovecha de la sesión 6: su configuración se saca a
+  [app/services/json_logger.py](app/services/json_logger.py).
+* Añadidos por nuestra cuenta: la pareja D del sanity check, `scripts/ingest_sample.py`,
+  los topes de tamaño, el código `503` para el límite de peticiones y el `422`
+  para un componente que no cabe en el modelo (8.191 tokens).
+* **Sin autenticación**: el endpoint gasta dinero, pero la API es de uso local
+  (`127.0.0.1`), como el resto, y no se ha añadido clave de acceso. Es una
+  limitación conocida: antes de exponerla fuera del equipo habría que añadirla.
+
 ## Arquitectura y capa de responsabilidades
 
 ```text
@@ -518,6 +710,7 @@ estimador-cag/
 │   │   ├── conversation_service.py  # Sesión 5: un turno completo, de los adjuntos a la memoria
 │   │   ├── turn_observer.py     # Sesión 6: el evento turn_observed (13 campos) y su registro con structlog
 │   │   ├── model_costs.py       # Sesión 6: precios por modelo y coste de cada turno
+│   │   ├── json_logger.py       # Sesión 7: logger de structlog (una línea JSON por evento), compartido
 │   │   └── attachments/
 │   │       ├── common.py            # Validación y límites de PDF y Word
 │   │       ├── path_a_files_api.py  # Camino A: Files API de Anthropic
@@ -528,6 +721,13 @@ estimador-cag/
 │   │   ├── estimation.py        # Contratos de petición y respuesta
 │   │   ├── idea.py              # Contratos de ideas y ejecuciones
 │   │   └── session.py           # Sesión 5: respuestas de /sessions
+│   ├── embedding_pipeline/      # Sesión 7: troceo y vectorización de presupuestos
+│   │   ├── __init__.py          # Para qué sirve y el recorrido de un presupuesto
+│   │   ├── schemas.py           # Los «moldes» Pydantic: Budget, Chunk, IngestRequest...
+│   │   ├── chunker.py           # JSONStructuralChunker: un componente = un chunk
+│   │   ├── embedder.py          # OpenAIEmbedder: lotes de 100, reintentos ante 429, coste
+│   │   ├── router.py            # POST /embeddings/ingest
+│   │   └── SANITY_CHECK.md      # Prueba de cordura con las parejas A-D
 │   ├── context/
 │   │   ├── __init__.py
 │   │   └── examples.py          # Conocimiento de referencia CAG
@@ -542,12 +742,20 @@ estimador-cag/
 │   ├── REPORT.md                # El informe: tablas y lectura
 │   ├── results.csv              # Una fila por turno de la batería
 │   └── results.xlsx             # Lo mismo, en Excel y explicado
-├── scripts/validate_pipeline.py
+├── data/
+│   └── budgets_sample.json      # Sesión 7: 15 presupuestos de ejemplo, en español (lo demás de data/ no se sube)
+├── scripts/
+│   ├── validate_pipeline.py     # La CI
+│   ├── compare.py               # Sesión 7: similitud coseno entre dos textos
+│   └── ingest_sample.py         # Sesión 7: manda el dataset al endpoint y guarda los vectores
 ├── tests/
 ├── streamlit_app.py             # Interfaz Streamlit (sesión 5: cliente de la API de sesiones)
 ├── arrancar_todo.bat            # Windows: API + Streamlit con un doble clic
 ├── .streamlit/config.toml       # Tema de la interfaz Streamlit (colores y letra)
 ├── .github/workflows/validate.yml
+├── Dockerfile                   # Sesión 7: imagen de la API (dos etapas)
+├── docker-compose.yml           # Sesión 7: el servicio ai_service
+├── .dockerignore                # Sesión 7: lo que NO entra en la imagen (la clave, sobre todo)
 ├── .env.example
 ├── .gitignore
 ├── pyproject.toml
@@ -579,6 +787,7 @@ Los ejemplos permanecen en el repositorio y se añaden a cada petición.
 | `POST /sessions` | Sesión 5: crear una conversación; devuelve `session_id`. Con `{"inherit_from": "<id>"}` hereda la memoria de otra sesión |
 | `GET /sessions/{id}` | Sesión 5: ver la memoria (`project_metadata`), el historial y cuándo caduca (`expires_at`). `410` si ha caducado. Sesión 6: también `last_turn_observed` |
 | `POST /sessions/{id}/estimate` | Sesión 5: estimar con transcripción y adjuntos (multipart); respuesta en streaming SSE. `410` si ha caducado. Sesión 6: el evento `done` (y el `error`, con `retryable`) lleva `turn_observed` |
+| `POST /embeddings/ingest` | Sesión 7: trocea presupuestos (un chunk por componente) y devuelve los chunks con su vector y las estadísticas (tokens y coste). `422`, `503` y `500` explicados en [Sesión 7](#sesión-7--embeddings-y-chunking-de-presupuestos) |
 
 Petición mínima para el endpoint original:
 
@@ -641,6 +850,16 @@ Los de la **sesión 6**, también sin claves ni red:
 | `test_build_pdfs.py` | Tamaño de los PDF, datos legibles y en su sitio, y el de 400 KB rechazado |
 | `test_stress_runner.py`, `test_stress_report.py`, `test_stress_excel.py` | La batería completa con el modelo de prueba: CSV, deriva turno a turno, `--resume`, tablas del informe y Excel |
 
+Los de la **sesión 7**, sin claves ni red (el embedder y el contador de tokens son falsos):
+
+| Fichero | Qué comprueba |
+| --- | --- |
+| `test_embedding_schemas.py` | Un presupuesto bueno pasa y uno malo se rechaza (sector inventado, horas negativas, dependencias rotas, campos de más, topes de tamaño); el dataset de ejemplo carga entero y sus horas cuadran |
+| `test_embedding_chunker.py` | Un chunk por componente y en orden; el texto exacto; qué va a la metadata; los límites de 1.000 y 8.191 tokens |
+| `test_embedding_embedder.py` | Lotes de 100 (250 chunks = 3 llamadas) y orden; reintentos solo ante 429 (1, 2 y 4 s); fallar duro; una línea JSON por lote; el coste |
+| `test_embeddings_api.py` | El endpoint con `httpx.AsyncClient`: `200` con estadísticas que cuadran, `422`, `500` genérico sin detalles internos, `503`, los topes y que aparece en OpenAPI |
+| `test_compare_script.py`, `test_ingest_sample_script.py` | El coseno con vectores de libro (iguales, perpendiculares, opuestos) y la salida de los dos scripts |
+
 ## Pipeline automático de validación
 
 ### Sin credenciales ni consumo de API
@@ -700,6 +919,8 @@ Markdown puede reflejar información del texto utilizado.
 | `MAX_ATTACHMENT_CHARS` | Caracteres de texto que pueden sumar los adjuntos (300000); si se pasa, 413, nunca se recorta en silencio |
 | `MAX_PDF_PAGES` / `MAX_DOCX_UNCOMPRESSED_MB` | Topes que se miran antes de abrir el fichero: páginas de un PDF (300) y tamaño de un Word descomprimido (50 MB). Cortan PDF de miles de páginas y «bombas ZIP» con un 413 |
 | `ATTACHMENT_EXTRACTION_TIMEOUT_S` | Camino B: segundos como máximo para extraer el texto (30). La extracción va en un proceso aparte que se cancela si se pasa, así un documento trucado no cuelga la API. `0` = sin límite, solo para depurar |
+| `EMBEDDING_MODEL` | Sesión 7: modelo de embeddings de OpenAI (`text-embedding-3-small`, 1536 números). Usa la misma `OPENAI_API_KEY` |
+| `AI_SERVICE_PORT` | Sesión 7, solo Docker: puerto de tu equipo en el que se publica el contenedor (8001). Se lee al lanzar `docker compose`, no lo usa la aplicación |
 
 El entorno tiene prioridad sobre `.env`, y este sobre los valores predeterminados
 de `config.py`. Reinicia la aplicación cuando cambies la configuración.
