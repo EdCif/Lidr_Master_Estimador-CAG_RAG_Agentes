@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import PROJECT_ROOT, get_settings
 from app.context.examples import ESTIMATION_EXAMPLES
+from app.embedding_pipeline.router import router as embeddings_router
 from app.errors import install_error_handlers
 from app.routers.estimations import router as estimations_router
 from app.routers.ideas import router as ideas_router
@@ -45,6 +46,8 @@ app.include_router(estimations_router)
 app.include_router(ideas_router)
 # Sesión 05: conversaciones con historial y memoria (POST /sessions...).
 app.include_router(sessions_router)
+# Sesión 07: troceo y vectorización de presupuestos (POST /embeddings/ingest).
+app.include_router(embeddings_router)
 app.mount("/assets", StaticFiles(directory=WEB_DIR), name="assets")
 
 

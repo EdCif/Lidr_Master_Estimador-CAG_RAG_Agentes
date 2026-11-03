@@ -214,6 +214,13 @@ class IngestRequestTests(unittest.TestCase):
 
         self.assertEqual(len(request.budgets[0].components), 2)
 
+    def test_the_docs_example_is_also_published_as_example_for_openapi_30(self):
+        """La API usa OpenAPI 3.0.3: /docs solo rellena el formulario con ``example`` (singular)."""
+        schema = IngestRequest.model_json_schema()
+
+        self.assertEqual(schema["example"], schema["examples"][0])
+        IngestRequest.model_validate(schema["example"])
+
 
 class OutputModelsTests(unittest.TestCase):
     def test_embedded_chunk_is_a_chunk_plus_the_vector(self):

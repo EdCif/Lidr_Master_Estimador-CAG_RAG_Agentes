@@ -202,6 +202,16 @@ class EmbeddedChunk(Chunk):
     embedding: list[float] = Field(min_length=1, description="El vector (1536 números con el modelo por defecto).")
 
 
+def _with_swagger_example(extra: dict) -> dict:
+    """Repite el primer ejemplo bajo la clave ``example`` (en singular).
+
+    La API se describe como OpenAPI 3.0.3 (ver ``app/main.py``) y en esa
+    versión la página /docs solo mira ``example``: con ``examples`` (plural, de
+    OpenAPI 3.1) el formulario saldría vacío en vez de traer un presupuesto.
+    """
+    return {**extra, "example": extra["examples"][0]}
+
+
 class IngestRequest(_Model):
     """Lo que recibe ``POST /embeddings/ingest``: una lista de presupuestos."""
 
@@ -211,7 +221,7 @@ class IngestRequest(_Model):
         str_strip_whitespace=True,
         extra="forbid",
         # Ejemplo que rellena el formulario de /docs («Try it out»).
-        json_schema_extra={
+        json_schema_extra=_with_swagger_example({
             "examples": [
                 {
                     "budgets": [
@@ -246,7 +256,7 @@ class IngestRequest(_Model):
                     ]
                 }
             ]
-        },
+        }),
     )
 
     @model_validator(mode="after")
