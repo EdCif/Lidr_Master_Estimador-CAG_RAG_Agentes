@@ -62,6 +62,7 @@ REQUIRED_FILES = (
     "app/embedding_pipeline/chunker.py",
     "app/embedding_pipeline/embedder.py",
     "app/embedding_pipeline/router.py",
+    "app/embedding_pipeline/SANITY_CHECK.md",
     "app/services/json_logger.py",
     "scripts/compare.py",
     "scripts/ingest_sample.py",
